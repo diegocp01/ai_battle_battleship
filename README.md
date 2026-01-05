@@ -2,7 +2,7 @@
 
 This is a Battleship game where GPT 5.1 Medium plays against Claude haiku 4.5 Thinking.
 
-![Battleship Demo](static/img/image.png)
+![Battleship Demo](static/img/image.png?v=2)
 
 **IMPORTANT:** You need to have an OpenAI and Anthropic API key to run this script.
 
