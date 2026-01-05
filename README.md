@@ -1,8 +1,8 @@
 # Overview
 
-This is a simple Tic Tac Toe game where GPT 5.2 High (Reasoning) plays against Claude Opus 4.5 Thinking.
+This is a Battleship game where GPT 5.1 Medium plays against Claude haiku 4.5 Thinking.
 
-![Tic Tac Toe Demo](static/img/image.png)
+![Battleship Demo](static/img/image.png)
 
 **IMPORTANT:** You need to have an OpenAI and Anthropic API key to run this script.
 
