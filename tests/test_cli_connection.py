@@ -152,6 +152,34 @@ class CLIConnectionTest(unittest.TestCase):
         node = [c for c in self.calls() if c['tool'] == 'node'][-1]
         self.assertEqual(node['effort'], 'medium')
 
+    def test_repeated_shot_stops_the_match(self):
+        self.client.post('/api/start-games', json={'mode': 'cli', 'gpt_model': 'gpt-6-luna', 'claude_model': 'claude-haiku-5-5'})
+        for _ in range(2):
+            self.client.post('/api/place-ships')
+        moves = [self.client.post('/api/next-move').get_json() for _ in range(2)]
+        # The stand-ins always fire at the same cell, so each side's second shot repeats its first.
+        repeat = self.client.post('/api/next-move')
+        self.assertEqual(repeat.status_code, 502)
+        self.assertIn('which it already fired at', repeat.get_json()['error'])
+        state = self.client.get('/api/game-state').get_json()
+        self.assertEqual(state['turn'], 2)
+        self.assertEqual(sum(len(p['shots']) for p in state['players'].values()), 2)
+
+    def test_illegal_placement_stops_the_match(self):
+        import cli_players
+        original = cli_players.read_placement
+        cli_players.read_placement = lambda data: ({**original(data)[0], 'Carrier': {'start': 'J10', 'direction': 'H'}}, 'Off the edge.')
+        try:
+            self.client.post('/api/start-games', json={'mode': 'cli', 'gpt_model': 'gpt-6-luna', 'claude_model': 'claude-haiku-5-5'})
+            response = self.client.post('/api/place-ships')
+            self.assertEqual(response.status_code, 502)
+            self.assertIn('placed an illegal fleet', response.get_json()['error'])
+            state = self.client.get('/api/game-state').get_json()
+            self.assertEqual(state['phase'], 'placement')
+            self.assertFalse(any(state['placement_done'].values()))
+        finally:
+            cli_players.read_placement = original
+
     def test_cli_failure_is_reported(self):
         os.environ['FAKE_FAIL'] = '1'
         self.client.post('/api/start-games', json={'mode': 'cli', 'gpt_model': 'gpt-6-luna', 'claude_model': 'claude-haiku-5-5'})
