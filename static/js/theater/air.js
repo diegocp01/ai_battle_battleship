@@ -66,7 +66,7 @@ export class AirTraffic {
             this.helos[team] = helo;
         }
         const jet = hornet(1.15);
-        this.jetGeometry = {gray: merge(jet.gray.map(g => g.clone())), glass: merge(jet.glass.map(g => g.clone()))};
+        this.jetGeometry = {gray: merge(jet.gray.map(g => g.clone())), glass: merge(jet.glass.map(g => g.clone())), dark: merge(jet.dark.map(g => g.clone()))};
         this.flights = [];
         this.nextFlight = 12 + Math.random() * 15;
         this.previous = new THREE.Vector3();
@@ -88,7 +88,7 @@ export class AirTraffic {
         const x = center.x + (Math.random() - .5) * 6;
         const jets = [0, 1].map(i => {
             const group = new THREE.Group();
-            group.add(new THREE.Mesh(this.jetGeometry.gray, this.materials.gray), new THREE.Mesh(this.jetGeometry.glass, this.materials.glass));
+            group.add(new THREE.Mesh(this.jetGeometry.gray, this.materials.gray), new THREE.Mesh(this.jetGeometry.glass, this.materials.glass), new THREE.Mesh(this.jetGeometry.dark, this.materials.dark));
             group.traverse(o => { if (o.isMesh) o.castShadow = true; });
             this.scene.add(group);
             return group;

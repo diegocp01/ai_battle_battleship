@@ -406,14 +406,15 @@ export class Theater {
             return {x: ndc.x * .5 + .5, y: ndc.y * .5 + .5, r: worldRadius * scale / -v.z, distance: -v.z};
         };
         const heat = u.uHeat.value;
-        const fires = this.effects.fires.filter(f => f.alive && (f.level ?? 0) > .2 && !(f.delay && f.age < f.delay))
-            .map(f => ({f, at: f.anchor.getWorldPosition(new THREE.Vector3())}))
+        const sources = this.effects.fires.filter(f => f.alive && (f.level ?? 0) > .2 && !(f.delay && f.age < f.delay))
+            .map(f => ({at: f.anchor.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, .12 + .08 * f.level, 0)), radius: .09 * Math.sqrt(f.scale * f.level), strength: Math.min(1, f.level)}))
+            .concat(this.effects.heatSources.map(source => source.get()))
             .sort((a, b) => a.at.distanceToSquared(camera.position) - b.at.distanceToSquared(camera.position));
         for (let i = 0; i < 6; i++) {
-            const item = fires[i];
-            const s = item && project(item.at.clone().add(new THREE.Vector3(0, .12 + .08 * item.f.level, 0)), .09 * Math.sqrt(item.f.scale * item.f.level));
+            const item = sources[i];
+            const s = item && project(item.at, item.radius);
             if (!s) { heat[i].w = 0; continue; }
-            heat[i].set(s.x, s.y, Math.max(.004, s.r), Math.min(.006, .045 * s.r) * Math.min(1, item.f.level));
+            heat[i].set(s.x, s.y, Math.max(.004, s.r), Math.min(.006, .045 * s.r) * item.strength);
         }
         const shock = u.uShock.value;
         const blasts = this.effects.blasts;

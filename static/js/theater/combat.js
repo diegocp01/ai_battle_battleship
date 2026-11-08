@@ -25,8 +25,13 @@ export class Combat {
         const fins = [0, 1, 2, 3].map(i => new THREE.BoxGeometry(.025, .03, .002).translate(-.045, 0, 0).rotateX(i * Math.PI / 2 + Math.PI / 4));
         this.missileGeometry = mergeGeometries([body, nose, ...fins].map(g => g.toNonIndexed()));
         this.missileMaterial = white;
-        this.bombGeometry = new THREE.CapsuleGeometry(.008, .04, 4, 8).rotateZ(Math.PI / 2);
-        this.bombMaterial = new THREE.MeshStandardMaterial({color: 0x3d4146, roughness: .6, metalness: .4});
+        // A Mk 84 bomb, 3.8 m: ogive nose, fat body, a cruciform box tail.
+        const bombBody = new THREE.CapsuleGeometry(.0062, .034, 6, 14).rotateZ(Math.PI / 2);
+        const bombNose = new THREE.ConeGeometry(.0058, .014, 14).rotateZ(-Math.PI / 2).translate(.027, 0, 0);
+        const bombFins = [0, 1, 2, 3].map(i => new THREE.BoxGeometry(.011, .015, .0008).translate(-.024, 0, 0).rotateX(i * Math.PI / 2 + Math.PI / 4));
+        const bombBand = new THREE.CylinderGeometry(.0065, .0065, .002, 14).rotateZ(Math.PI / 2).translate(.016, 0, 0);
+        this.bombGeometry = mergeGeometries([bombBody, bombNose, bombBand, ...bombFins].map(g => g.toNonIndexed()));
+        this.bombMaterial = new THREE.MeshStandardMaterial({color: 0x5a5e46, roughness: .55, metalness: .25});
     }
 
     // ---------------------------------------------------------------------------------------------------
@@ -373,17 +378,62 @@ export class Combat {
         if (context.victim) impact.y = Math.max(.03, impact.y - .1);
     }
 
+    // The carrier strike. A Super Hornet on the bow catapult spools up to full afterburner behind its raised
+    // blast deflector, steam leaking from the track; the catapult throws it off the bow; it climbs, turns over
+    // the barrier and dives on the target, releases a Mk 84 from its centreline, and pulls up hard, punching
+    // out flares as it goes.
     async strike(carrier, impact, context) {
         const T = this.t;
         T.scene.updateMatrixWorld();
         const cat = carrier.catapult;
         const deckStart = carrier.body.localToWorld(cat.start.clone());
         const deckEnd = carrier.body.localToWorld(cat.end.clone());
-        const jet = jetMesh(carrier.materials, 1.15 * carrier.scale.x);
+        const scale = 1.15 * carrier.scale.x;
+        const jet = jetMesh(carrier.materials, scale);
         jet.traverse(o => { if (o.isMesh) o.castShadow = true; });
-        T.effects.steam(deckStart, .7);
+        // The bomb hangs on the centreline station until it is released.
+        const slung = new THREE.Mesh(this.bombGeometry, this.bombMaterial);
+        slung.position.set(-.01 * scale, -.0175 * scale, 0);
+        slung.castShadow = true;
+        jet.add(slung);
         const forward = deckEnd.clone().sub(deckStart).normalize();
-        T.director.cueLaunch({at: deckStart.clone().add(new THREE.Vector3(0, .04, 0)), dir: forward});
+        const heading = Math.atan2(-forward.z, forward.x);
+        // On the catapult: the jet at the shuttle, nose to the bow.
+        jet.position.copy(deckStart);
+        jet.rotation.set(0, heading, 0);
+        T.scene.add(jet);
+        const nozzle = () => jet.position.clone().addScaledVector(new THREE.Vector3(1, 0, 0).applyQuaternion(jet.quaternion), -.13 * scale);
+        const heat = {get: () => ({at: nozzle(), radius: .05, strength: 1})};
+        T.effects.heatSources.push(heat);
+        // The jet blast deflector rises out of the deck behind the jet, hinged at its forward edge.
+        const localForward = cat.end.clone().sub(cat.start).normalize();
+        const jbd = new THREE.Group();
+        jbd.position.copy(cat.start).addScaledVector(localForward, -.16 * scale);
+        jbd.position.y -= .014;
+        jbd.rotation.y = Math.atan2(-localForward.z, localForward.x);
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(.006, .05, .15).translate(0, .025, 0), carrier.materials.steel);
+        panel.castShadow = true;
+        panel.rotation.z = Math.PI / 2;
+        jbd.add(panel);
+        carrier.attach(jbd);
+        T.director.cueStrike('spool', {at: deckStart.clone(), forward});
+        T.audio.play('jet', deckEnd, 6.5);
+        // Spool-up: the deflector comes up, the engines wind to full afterburner, steam leaks from the track.
+        const spool = 1.5;
+        await T.tween(spool, (k) => {
+            panel.rotation.z = THREE.MathUtils.lerp(Math.PI / 2, .5, Math.min(1, k * 2.2));
+            T.scene.updateMatrixWorld();
+            T.effects.afterburner(nozzle(), forward.clone().negate(), new THREE.Vector3(), Math.min(1, .35 + k * 1.3), scale, 1 / 60);
+            if (Math.random() < .5) {
+                const at = deckStart.clone().lerp(deckEnd, Math.random());
+                T.effects.spawn({x: at.x, y: at.y - .01, z: at.z, vx: (Math.random() - .5) * .05, vy: .05 + Math.random() * .08, vz: (Math.random() - .5) * .05, ramp: RAMP.STEAM, frame: FRAME.SMOKE, size: .03 + Math.random() * .04, life: 1.4 + Math.random(), drag: 1.5, lift: .2, wind: .7, alpha: .6});
+            }
+        });
+        // The deck camera stands on the port side of the bow catapult, clear of the deck park on the starboard side.
+        const deckCamera = carrier.body.localToWorld(cat.start.clone().lerp(cat.end, .72).add(new THREE.Vector3(0, .026, -.17)));
+        T.director.cueStrike('catapult', {start: deckStart.clone(), end: deckEnd.clone(), forward, camera: deckCamera});
+        const glowAt = () => jet.position.clone().addScaledVector(new THREE.Vector3(1, 0, 0).applyQuaternion(jet.quaternion), -.5 * scale);
+        T.effects.follow(glowAt, .55, 5, new THREE.Color(1, .62, .32));
         const toward = impact.clone().sub(deckEnd).setY(0).normalize();
         const side = new THREE.Vector3().crossVectors(toward, UP).multiplyScalar(Math.random() < .5 ? 1 : -1);
         const outward = Math.sign(impact.x) || 1;
@@ -412,30 +462,60 @@ export class Combat {
         const duration = 5.2;
         // Catapult stroke: a fast acceleration down the deck, then cruising speed.
         const ease = (k) => (k < .12 ? .045 * Math.pow(k / .12, 2) : .045 + (k - .12) / .88 * .955);
-        T.audio.play('jet', deckEnd, duration * .9);
-        let dropped = false;
+        let dropped = false, flaresOut = false;
         let bombDone;
         const bombArrived = new Promise(resolve => { bombDone = resolve; });
-        const flight = {kind: 'jet', path: (k) => curve.getPointAt(Math.min(1, ease(k))), duration, mesh: jet, primary: !dropped, orient: true};
+        const flight = {kind: 'jet', path: (k) => curve.getPointAt(Math.min(1, ease(k))), duration, mesh: jet, primary: true, orient: true};
         const promise = this.fly(flight);
         const record = this.projectiles[this.projectiles.length - 1];
+        record.scale = scale;
         record.onStep = (k, position, p) => {
             const u = ease(k);
             const ahead = curve.getPointAt(Math.min(1, u + .01));
             const behind = curve.getPointAt(Math.max(0, u - .01));
             const turn = ahead.clone().sub(position).normalize().cross(position.clone().sub(behind).normalize()).y;
             p.bank = THREE.MathUtils.clamp(-turn * 60, -1.1, 1.1);
+            // Down the deck: the catapult's steam blows out of the track behind the shuttle.
+            if (u < .05) {
+                for (let i = 0; i < 3; i++) {
+                    const at = deckStart.clone().lerp(position, Math.random());
+                    T.effects.spawn({x: at.x, y: at.y - .01, z: at.z, vx: (Math.random() - .5) * .2, vy: .1 + Math.random() * .2, vz: (Math.random() - .5) * .2, ramp: RAMP.STEAM, frame: FRAME.SMOKE, size: .05 + Math.random() * .06, life: 2 + Math.random() * 1.5, drag: 1.4, lift: .25, wind: .8, alpha: .8});
+                }
+            } else if (!p.lowered) {
+                p.lowered = true;
+                T.tween(1.2, (q) => { panel.rotation.z = THREE.MathUtils.lerp(.5, Math.PI / 2, q); }).then(() => setTimeout(() => jbd.removeFromParent(), 0));
+            }
             if (!dropped && u >= releaseU) {
                 dropped = true;
                 p.primary = false;
-                const from = position.clone();
+                // The bomb leaves the centreline station with the jet's own speed and falls away.
+                T.scene.updateMatrixWorld();
+                const from = slung.getWorldPosition(new THREE.Vector3());
+                slung.visible = false;
                 const bomb = new THREE.Mesh(this.bombGeometry, this.bombMaterial);
-                const fall = .75;
+                bomb.castShadow = true;
+                const fall = .85;
                 T.audio.play('whistle', impact, fall);
-                this.fly({kind: 'bomb', path: this.ballistic(from, impact, .15), duration: fall, mesh: bomb, primary: true}).then(bombDone);
+                T.director.cueStrike('release');
+                T.slowMotion(.35, .9);
+                this.fly({kind: 'bomb', path: this.ballistic(from, impact, .12), duration: fall, mesh: bomb, primary: true}).then(bombDone);
+            }
+            // Pulling off the target it punches out flares, which arc away burning white.
+            if (dropped && !flaresOut && u > releaseU + .05) {
+                flaresOut = true;
+                const back = position.clone().sub(behind).normalize().negate();
+                const across = new THREE.Vector3().crossVectors(back, UP).normalize();
+                for (let i = 0; i < 8; i++) {
+                    const s = i % 2 ? 1 : -1;
+                    const to = position.clone().addScaledVector(back, .7 + Math.random() * .5).addScaledVector(across, s * (.4 + Math.random() * .7)).add(new THREE.Vector3(0, -1.2 - Math.random() * .8, 0));
+                    setTimeout(() => this.fly({kind: 'flare', path: this.ballistic(position.clone(), to, .25), duration: 1.5 + Math.random() * .4}), i * 45);
+                }
             }
         };
-        promise.then(() => jet.traverse(o => o.geometry?.dispose()));
+        promise.then(() => {
+            T.effects.heatSources.splice(T.effects.heatSources.indexOf(heat), 1);
+            jet.traverse(o => { if (o !== slung) o.geometry?.dispose(); });
+        });
         await bombArrived;
     }
 

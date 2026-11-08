@@ -457,7 +457,7 @@ function deckEdge(x, side) {
 export function jetMesh(mats, scale = 1.1) {
     const pieces = hornet(scale);
     const group = new THREE.Group();
-    group.add(partMesh(mats.jet, pieces.gray), partMesh(mats.glass, pieces.glass));
+    group.add(partMesh(mats.jet, pieces.gray), partMesh(mats.glass, pieces.glass), partMesh(mats.dark, pieces.dark));
     return group;
 }
 
@@ -508,12 +508,13 @@ function carrier(b) {
     b.add('lightWhite', sphere(.0042, 8, 6), [mastTop.x, mastTop.y + .005, mastTop.z]);
     // The deck park: Super Hornets along the bow and the starboard side, Hawkeyes, Seahawks, tractors.
     const jets = hornet(.95);
-    const park = [[2.15, .14, 2.4], [1.98, .22, 2.4], [1.81, .28, 2.4], [1.64, .33, 2.4], [1.47, .36, 2.4], [1.9, -.17, -.2],
+    const park = [[2.15, .14, 2.4], [1.98, .22, 2.4], [1.81, .28, 2.4], [1.64, .33, 2.4], [1.47, .36, 2.4], [1.75, -.22, -.2],
         [-.78, .34, 2.25], [-1.0, .34, 2.25], [-1.22, .34, 2.25], [-1.44, .34, 2.25], [-1.66, .34, 2.25], [-1.88, .33, 2.25], [-2.1, .31, 2.25],
         [-.9, .19, 2.25], [-1.12, .19, 2.25], [-1.34, .19, 2.25], [-1.56, .19, 2.25], [-1.78, .18, 2.25], [1.2, .38, 2.5], [1.0, .4, 2.5]];
     for (const [x, z, yaw] of park) {
         for (const piece of jets.gray) b.add('jet', piece.clone(), [x, top + .013, z], [0, yaw, 0]);
         for (const piece of jets.glass) b.add('glass', piece.clone(), [x, top + .013, z], [0, yaw, 0]);
+        for (const piece of jets.dark) b.add('dark', piece.clone(), [x, top + .013, z], [0, yaw, 0]);
     }
     const hawk = hawkeye(1);
     for (const [x, z, yaw] of [[.3, .33, 2.6], [.6, .35, 2.6]]) {
@@ -525,7 +526,7 @@ function carrier(b) {
     for (const [x, z, yaw] of [[-.66, .2, 0], [1.3, .24, .8], [-1.95, .2, 1.2], [.15, .38, 2]]) tug(b, x, top, z, yaw);
     // The flight deck crew, in their jerseys: at the catapult, round the parked jets, by the island and the fuel.
     const jerseys = ['yellow', 'crewPurple', 'crewGreen', 'crewRed', 'crewBrown', 'white', 'crewBlue'];
-    for (const [x, z, n] of [[1.05, -.12, 4], [1.6, -.08, 3], [2.0, .05, 3], [1.75, .2, 3], [1.3, .3, 3], [.45, .24, 3], [-.15, .3, 4], [-.62, .27, 2], [-1.05, .26, 4], [-1.5, .27, 3], [-1.85, .1, 3], [-2.15, .16, 2], [.9, .3, 2]]) {
+    for (const [x, z, n] of [[1.0, -.2, 4], [1.45, .1, 3], [2.15, .1, 2], [1.75, .2, 3], [1.3, .3, 3], [.45, .24, 3], [-.15, .3, 4], [-.62, .27, 2], [-1.05, .26, 4], [-1.5, .27, 3], [-1.85, .1, 3], [-2.15, .16, 2], [.9, .3, 2]]) {
         crewGroup(b, x, top, z, jerseys, n, .04);
     }
     // Hangar openings under the overhang, deck-edge antennas folded outboard, sponsons with launchers and CIWS.

@@ -25,7 +25,7 @@ AI Battleship: two AI models deploy their fleets and trade fire on a full-screen
   - The battleship trains a turret and fires a three-gun broadside that heels the ship. It throws a fireball, a cloud of cordite smoke and a blast ring on the water, and the shells leave tracer streaks.
   - Cruisers ripple two missiles and the littoral combat ship fires one. Fire blows out of the launcher, and a dense smoke column climbs after the missile. The motor shows shock diamonds and lays a continuous, drifting smoke trail.
   - The submarine's missile breaches the surface.
-  - The carrier launches a jet that climbs over the barrier, trailing wingtip vortices in its turns, and dives to drop its bomb.
+  - The carrier strike: a Super Hornet (with its strakes, intakes, drop tanks, wingtip Sidewinders and twin nozzles) spools up to full afterburner on the bow catapult behind its raised blast deflector, steam leaking from the track. The catapult throws it off the bow. It climbs over the barrier with twin afterburner plumes and shock diamonds, vapor flashing over its wings in hard pulls, dives, releases a finned Mk 84 from its centreline and pulls up hard, punching out flares.
 - **Impacts**:
   - **Miss**: the round bursts on the water. A tall column rises with a crown of spray and a base surge of mist rolling out, rings spread across the sea, and a marker buoy stays behind.
   - **Hit**: the blast depends on the weapon. A 5-inch shell makes a sharp, small burst. A 16-inch armour-piercing shell bursts inside the hull and vents up through the deck. A missile's warhead and unburned fuel make a rolling fireball and a rain of burning fragments. A bomb makes the biggest fireball and blast front. The ship matters too: armour sheds sparks and keeps a small shell's blast outside, the carrier's fuel and ordnance go up a moment later, and a submarine's breach is half steam. Each fireball is thrown out at blast speed, stopped by the air, then rises on its own heat and rolls into black smoke. Ammunition cooks off afterwards and burning fuel spreads on the water. Shells sometimes strike low at the waterline and throw the sea up with the fire.
@@ -41,6 +41,7 @@ AI Battleship: two AI models deploy their fleets and trade fire on a full-screen
   - close beside the gun, launcher or catapult as it fires;
   - a camera above the barrier panning with the round as it climbs across (on longer flights);
   - a drone flying right beside the round as it comes down, slowing to slow motion just before it lands;
+  - for the carrier strike: a low shot on deck by the jet as it spools up, a deck camera at the bow whipping round as the jet charges past, a chase camera behind the jet over the barrier and down its dive, then the drone beside the falling bomb;
   - a low angle over the water on the far side as it strikes.
   
   There is also a tactical wide view and a free camera. Scroll or pinch to zoom whichever camera is running, and drag at any time to take the camera yourself.

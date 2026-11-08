@@ -258,6 +258,7 @@ export class Effects {
         this.emitters = [];
         this.pending = [];
         this.blasts = [];
+        this.heatSources = [];
         this.lights = Array.from({length: 6}, () => {
             const light = new THREE.PointLight(0xffaa66, 0, 0, 2);
             light.castShadow = false;
@@ -341,6 +342,27 @@ export class Effects {
         if (p.collide[i] < 1.5 && vy < -1.3 && size > .035 && Math.random() < .55) {
             const a = Math.random() * Math.PI * 2, kick = -vy * (.08 + Math.random() * .12);
             this.pendingSpawns.push({x, y: .01, z, vx: Math.cos(a) * kick, vy: -vy * (.22 + Math.random() * .2), vz: Math.sin(a) * kick, ramp: RAMP.SPRAY, frame: FRAME.SPRAY, size: Math.min(.05, size * .45), life: .35 + Math.random() * .3, drag: .3, lift: -5, collide: 2, terminal: 1.4 + size * 6, stretch: .012});
+        }
+    }
+
+    // One jet's afterburners: two white-blue cores, long orange flames with shock diamonds standing in them,
+    // riding with the jet. at: between the nozzles; back: the way the exhaust leaves; power 0..1.
+    afterburner(at, back, velocity, power, scale = 1.1, dt = 1 / 60) {
+        const r = Math.random;
+        const across = new THREE.Vector3().crossVectors(back, new THREE.Vector3(0, 1, 0));
+        if (across.lengthSq() < 1e-6) across.set(0, 0, 1);
+        across.normalize();
+        const life = Math.min(.034, dt * 1.05);
+        const ride = {vx: velocity.x, vy: velocity.y, vz: velocity.z, drag: 0};
+        for (const s of [1, -1]) {
+            const n = at.clone().addScaledVector(across, s * .0085 * scale);
+            const flicker = .85 + r() * .3;
+            this.spawn({x: n.x, y: n.y, z: n.z, ...ride, ramp: RAMP.EXHAUST, frame: FRAME.GLOW, size: .042 * scale * power * flicker, life, intensity: 1.5});
+            for (let d = 1; d <= 4; d++) {
+                const q = n.clone().addScaledVector(back, d * .016 * scale * (.6 + power * .6));
+                this.spawn({x: q.x, y: q.y, z: q.z, ...ride, ramp: RAMP.EXHAUST, frame: FRAME.GLOW, size: (.016 - d * .0022) * scale * flicker, life, intensity: (1.5 - d * .25) * power});
+            }
+            this.spawn({x: n.x, y: n.y, z: n.z, vx: velocity.x + back.x * 4 * power, vy: velocity.y + back.y * 4 * power, vz: velocity.z + back.z * 4 * power, ramp: RAMP.EXHAUST, frame: FRAME.FLAME, size: .022 * scale, life: .05, drag: 0, stretch: .025, intensity: power});
         }
     }
 
@@ -615,12 +637,20 @@ export class Effects {
                 this.spawn({x: seg.x0 + (tail.x - seg.x0) * k + (r() - .5) * .02, y: seg.y0 + (tail.y - seg.y0) * k + (r() - .5) * .02, z: seg.z0 + (tail.z - seg.z0) * k + (r() - .5) * .02, vx: back.x * .25 + (r() - .5) * spread, vy: back.y * .25 + (r() - .5) * spread, vz: back.z * .25 + (r() - .5) * spread, ramp: boost ? RAMP.LAUNCH_SMOKE : RAMP.TRAIL, frame: FRAME.SMOKE, size: (boost ? .085 : .068) + r() * .018, life: (boost ? 11 : 8) + r() * 4, drag: 1.4, lift: .1, cool: 4, wind: .9, turb: .12});
             }
         } else if (kind === 'jet') {
-            // Afterburner, a faint exhaust trail, and vortices streaming off the wingtips in hard turns.
-            const tail = at.clone().addScaledVector(back, .1);
-            this.spawn({x: tail.x, y: tail.y, z: tail.z, ramp: RAMP.EXHAUST, frame: FRAME.GLOW, size: .07, life: .06, drag: 0, intensity: 1.5});
-            this.spawn({x: tail.x, y: tail.y, z: tail.z, vx: back.x * 3, vy: back.y * 3, vz: back.z * 3, ramp: RAMP.EXHAUST, frame: FRAME.FLAME, size: .03, life: .05, drag: 0, stretch: .02, intensity: 1.2});
-            along(.05, (x, y, z) => this.spawn({x: x + back.x * .14, y, z: z + back.z * .14, ramp: RAMP.TRAIL, frame: FRAME.WISP, size: .028, life: 1.4, drag: 1, alpha: .45, wind: .4}));
+            // Twin afterburners, a faint exhaust trail, vapor over the wings and vortices off the tips in hard turns.
+            const scale = projectile?.scale || 1.1;
+            this.afterburner(at.clone().addScaledVector(back, .13 * scale), back, velocity, 1, scale, dt);
             const bank = Math.abs(projectile?.bank || 0);
+            if (bank > .7) {
+                // Condensation over the wings as they pull hard: a white sheet that flickers on the upper surfaces.
+                const up = new THREE.Vector3(0, 1, 0);
+                const across = new THREE.Vector3().crossVectors(dir, up).normalize();
+                for (let i = 0; i < 4; i++) {
+                    const s = (r() - .5) * 2;
+                    const p = at.clone().addScaledVector(across, s * .07 * scale).addScaledVector(dir, -.03 * scale + (r() - .5) * .03).add(new THREE.Vector3(0, .01 * scale, 0));
+                    this.spawn({x: p.x, y: p.y, z: p.z, vx: velocity.x * .92, vy: velocity.y * .92, vz: velocity.z * .92, ramp: RAMP.MIST, frame: FRAME.SMOKE, size: .018 + r() * .014, life: .08 + r() * .06, drag: 4, alpha: Math.min(1, (bank - .7) * 3) * .55});
+                }
+            }
             if (bank > .35) {
                 const side = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(.075);
                 along(.03, (x, y, z) => {
@@ -629,6 +659,10 @@ export class Effects {
             }
         } else if (kind === 'torpedo') {
             for (let i = 0; i < 2; i++) this.spawn({x: at.x + (r() - .5) * .05, y: .015, z: at.z + (r() - .5) * .05, vx: 0, vy: .08 + r() * .12, vz: 0, ramp: RAMP.WAKE, frame: r() < .5 ? FRAME.SPRAY : FRAME.BUBBLE, size: .05 + r() * .05, life: 1.6 + r() * .8, drag: 2, lift: -.1});
+        } else if (kind === 'flare') {
+            // A decoy flare: a white-hot magnesium point and the thick white smoke it leaves.
+            this.spawn({x: at.x, y: at.y, z: at.z, vx: velocity.x, vy: velocity.y, vz: velocity.z, ramp: RAMP.FLASH, frame: FRAME.GLOW, size: .07, life: Math.min(.034, dt * 1.05), drag: 0, intensity: 1.6});
+            along(.02, (x, y, z) => this.spawn({x, y, z, vx: (r() - .5) * .04, vy: (r() - .5) * .04, vz: (r() - .5) * .04, ramp: RAMP.TRAIL, frame: FRAME.SMOKE, size: .025 + r() * .015, life: 3 + r() * 2, drag: 1.2, lift: .05, wind: .7, turb: .3, alpha: .75}));
         } else if (kind === 'bomb') {
             // Air streaming off the fins as it falls.
             along(.05, (x, y, z) => this.spawn({x, y, z, ramp: RAMP.GUNSMOKE, frame: FRAME.WISP, size: .016, life: .45, drag: 2, alpha: .35}));
@@ -1078,7 +1112,7 @@ class Shockwaves {
         item.duration = kind === 'water' ? 1.1 + scale * .4 : .45;
         item.size = (kind === 'water' ? 2.4 : 1.8) * scale;
         item.mesh.position.set(at.x, kind === 'water' ? .02 : at.y, at.z);
-        item.mesh.material.uniforms.uStrength.value = kind === 'water' ? .22 : .22;
+        item.mesh.material.uniforms.uStrength.value = kind === 'water' ? .22 : .08;
         item.mesh.visible = true;
     }
 

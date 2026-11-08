@@ -222,12 +222,16 @@ export class Director {
         // The drone takes over once the round is over the barrier and coming down on the far side; until then
         // the side view shows it climbing across.
         const homeSide = Math.sign(shot.target.x) || 1;
-        const across = projectile.x * homeSide > .7 && progress > .4;
-        const want = progress < (duration > 2.1 ? .14 : .18) ? 1 : across ? 3 : 2;
-        if (want > shot.step) {
-            shot.step = want;
-            if (want === 2) this.cutSide(projectile);
-            if (want === 3) shot.phase = 'drone';
+        if (shot.strike) {
+            if (this.followStrike(projectile)) return;
+        } else {
+            const across = projectile.x * homeSide > .7 && progress > .4;
+            const want = progress < (duration > 2.1 ? .14 : .18) ? 1 : across ? 3 : 2;
+            if (want > shot.step) {
+                shot.step = want;
+                if (want === 2) this.cutSide(projectile);
+                if (want === 3) shot.phase = 'drone';
+            }
         }
         if (shot.phase === 'launch') {
             this.goal.look.lerp(projectile, .35);
@@ -255,6 +259,72 @@ export class Director {
             this.goal.smooth = .05;
             this.goal.lookSmooth = .05;
         }
+    }
+
+    // The carrier strike has its own shots. spool: on deck by the jet's nose, low, the afterburners lighting
+    // the blast deflector behind it. catapult: a camera low on the bow edge looking back down the track, whipping
+    // round as the jet roars past. Then a chase camera behind the jet as it climbs and turns over the barrier,
+    // and at release the drone beside the falling bomb.
+    cueStrike(stage, data = {}) {
+        const shot = this.shot;
+        if (!shot || this.mode !== 'cinematic') return;
+        shot.strike = true;
+        const f = data.forward;
+        const side = f ? new THREE.Vector3().crossVectors(f, UP).normalize().multiplyScalar(shot.sideSign) : null;
+        if (stage === 'spool') {
+            shot.phase = 'spool';
+            const at = data.at;
+            this.cut(at.clone().addScaledVector(f, .4).addScaledVector(side, .3).add(new THREE.Vector3(0, .05, 0)), at.clone().addScaledVector(f, -.06).add(new THREE.Vector3(0, .015, 0)));
+            this.goal.position.copy(at).addScaledVector(f, .3).addScaledVector(side, .25).add(new THREE.Vector3(0, .045, 0));
+            this.goal.smooth = 2.6;
+            this.goal.lookSmooth = 1.6;
+        } else if (stage === 'catapult') {
+            // On the deck near the bow, just clear of the jet's wingtip, low: the jet charges at the lens.
+            shot.phase = 'catapult';
+            shot.forward = f.clone();
+            const position = data.camera ? data.camera.clone() : data.start.clone().lerp(data.end, .78).addScaledVector(side, .14).add(new THREE.Vector3(0, .028, 0));
+            shot.bow = position.clone();
+            this.cut(position, data.start.clone().add(new THREE.Vector3(0, .012, 0)));
+            this.goal.smooth = 6;
+        } else if (stage === 'release') {
+            shot.phase = 'drone';
+            shot.droneStarted = false;
+            shot.last = null;
+        }
+    }
+
+    // Per frame during the strike's flight. Returns true when it has set the camera itself.
+    followStrike(projectile) {
+        const shot = this.shot;
+        if (shot.phase === 'catapult') {
+            // A fixed camera on the bow, whipping round as the jet goes past.
+            this.goal.look.copy(projectile).add(new THREE.Vector3(0, .01, 0));
+            this.goal.lookSmooth = .03;
+            if (projectile.clone().sub(shot.bow).dot(shot.forward) > .45) {
+                shot.phase = 'chase';
+                shot.chaseStarted = false;
+            }
+            return true;
+        }
+        if (shot.phase === 'chase') {
+            // Behind and a little above the jet, offset to one side, lagging just enough to feel its speed.
+            const dir = shot.dir || shot.forward;
+            const side = new THREE.Vector3().crossVectors(dir, UP);
+            if (side.lengthSq() < 1e-6) side.copy(shot.side);
+            side.normalize().multiplyScalar(shot.sideSign);
+            // Behind it on the level and above, so a climb shows the jet's back against the sea, not its belly.
+            const flat = dir.clone().setY(0);
+            if (flat.lengthSq() < 1e-4) flat.copy(shot.forward);
+            flat.normalize();
+            // Rigidly mounted, like a camera on a chase plane: no lag, so the jet holds its place in the frame.
+            const position = projectile.clone().addScaledVector(flat, -.5).addScaledVector(side, .17).add(new THREE.Vector3(0, .2, 0));
+            // Aim ahead on the level, rising only a little with a climb, so the jet sits just below the middle.
+            const look = projectile.clone().addScaledVector(flat, .85).add(new THREE.Vector3(0, dir.y * .3 - .02, 0));
+            if (!shot.chaseStarted) shot.chaseStarted = true;
+            this.cut(position, look);
+            return true;
+        }
+        return false;
     }
 
     // The side view: a camera hanging above the barrier, square to the round's path, panning with it.
