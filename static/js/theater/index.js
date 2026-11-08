@@ -23,6 +23,10 @@ import { LayerRenderPass, AmbientOcclusionPass, ShadowFocus, FX_LAYER } from './
 // through a small promise-based API (deploy, playShot, celebrate), and the DOM boards stay the accessible
 // source of truth. Sky, sea, ships and fire are generated in code; battle audio uses local recordings.
 
+// The battle's base pace: at 1x, battle time runs at half the speed it first had, so shots, flights and the
+// cinematics can be followed; 2x is the original pace.
+const BATTLE_PACE = .5;
+
 export const TEAMS = {
     gpt: {id: 'gpt', name: 'GPT', color: '#3d8bff', paint: 0x838b92, superstructure: 0x939aa0, mascot: '/static/img/mascot-codex.png'},
     claude: {id: 'claude', name: 'Claude', color: '#ff8552', paint: 0x88898a, superstructure: 0x979897, mascot: '/static/img/mascot-claude.png'},
@@ -139,6 +143,9 @@ export class Theater {
         this.speed = 1;
         this.time = 0;
         this.realTime = 0;
+        // The sea keeps its own clock: its waves run at their natural speed whatever the battle speed (only the
+        // cinematic slow motion slows it), so ships, buoys, floats and debris all ride the same water.
+        this.seaTime = 0;
         this.timers = [];
         this.tweens = [];
         this.slow = {factor: 1, until: 0};
@@ -203,6 +210,7 @@ export class Theater {
             },
         };
         this.audio = new BattleAudio();
+        this.audio.pace = this.pace;
         this.audio.setCamera(camera);
         this.grid = new Battlefield(scene, this.ocean, {origins: ORIGINS, colors: this.colors, names: {gpt: TEAMS.gpt.name, claude: TEAMS.claude.name}});
         // The framed area: both boards, their banners above and their legends below.
@@ -322,9 +330,11 @@ export class Theater {
     step(realDt) {
         this.realTime += realDt;
         if (this.slow.factor < 1 && this.realTime > this.slow.until) this.slow.factor = Math.min(1, this.slow.factor + realDt * 1.5);
-        const dt = Math.min(.25, realDt * this.speed * this.slow.factor);
+        const dt = Math.min(.25, realDt * this.speed * BATTLE_PACE * this.slow.factor);
         this.time += dt;
         const time = this.time;
+        this.seaTime += Math.min(.25, realDt * this.slow.factor);
+        const sea = this.seaTime;
         this.timers = this.timers.filter(timer => {
             if (time >= timer.at) { timer.resolve(); return false; }
             return true;
@@ -345,20 +355,20 @@ export class Theater {
             } else this.env.drift = drift;
         }
         this.renderer.toneMappingExposure += (this.env.exposure - this.renderer.toneMappingExposure) * Math.min(1, realDt * 2);
-        this.ocean.update(time);
-        this.wall.update(time, this.ocean);
-        this.shared.time.value = time;
+        this.ocean.update(sea);
+        this.wall.update(sea, this.ocean);
+        this.shared.time.value = sea;
         const shipData = [];
         for (const fleet of Object.values(this.fleets)) {
             if (!fleet) continue;
             for (const ship of fleet.ships.values()) {
-                ship.update(dt, time, this.ocean);
+                ship.update(dt, sea, this.ocean);
                 // Sinking ships boil with escaping air; wrecks keep breathing out the odd bubble.
                 const sinking = ship.state === 'sinking' ? Math.min(1, (ship.sinking?.t || 0) / 2) : ship.state === 'sunk' ? .6 : 0;
                 if (sinking && Math.random() < dt * (ship.state === 'sunk' ? 1.5 : 20)) this.effects.bubbles(ship.root.position, ship.length * .35, 1);
                 if (ship.sail && Math.random() < dt * 30) this.wake(ship);
                 // The bow digs into the swell now and then and throws spray (surface ships, afloat).
-                if (ship.state === 'afloat' && ship.type !== 'Submarine') this.bowWave(ship, dt, time);
+                if (ship.state === 'afloat' && ship.type !== 'Submarine') this.bowWave(ship, dt, sea);
                 shipData.push({x: ship.root.position.x, z: ship.root.position.z, heading: ship.root.rotation.y, halfLength: ship.length / 2, halfBeam: ship.beam / 2, speed: ship.state === 'afloat' ? Math.min(1, ship.speed) : 0, foam: ship.type === 'Submarine' ? 1 : .4, sinking});
             }
         }
@@ -373,8 +383,9 @@ export class Theater {
         // frame (a stale camera after a cut would show them edge-on as streaks).
         this.director.update(dt);
         this.camera.updateMatrixWorld();
+        this.effects.seaTime = sea;
         this.effects.update(dt, this.camera);
-        this.grid.update(dt, time);
+        this.grid.update(dt, sea);
         this.grid.updateLegends(this.camera);
         this.air.update(dt, time);
         const flash = this.grade.uniforms.uFlash;
@@ -695,6 +706,12 @@ export class Theater {
 
     setSpeed(speed) {
         this.speed = speed;
+        this.audio.pace = this.pace;
+    }
+
+    // How fast battle time runs against real time (the speed button times the base pace).
+    get pace() {
+        return this.speed * BATTLE_PACE;
     }
 
     setMuted(muted) {

@@ -175,4 +175,8 @@ The CLIs and API connections have tests with stand-ins for `claude`, `codex`, `n
 | `M` | Sound on or off |
 | `F` | Full screen |
 
-The speed button in the top left plays the battle at 1×, 2× or 4×.
+The speed button in the top left plays the battle at 1×, 2×, 4× or 8×.
+- **1×** is a relaxed pace, so the shots, flights and cinematics can be followed. A carrier strike takes about 17 s from launch to impact.
+- **2×** is the original pace, and 8× matches the old 4×.
+- **What stays at its own speed:** the sea's waves always run at their natural speed, slowed only by the cinematic slow motion. Ships, buoys, the barrier's floats and debris ride the same water.
+- **Sounds:** those that last as long as something in the battle (a shell's whistle, a torpedo's run, the strike jet) stretch to match the pace.
