@@ -27,7 +27,7 @@ AI Battleship: two AI models deploy their fleets and trade fire on a full-screen
   - **Destroyer (2)**: the little boat, a Freedom-class littoral combat ship (118 m). It has a faceted deckhouse, an enclosed mast, a 57 mm gun, Naval Strike Missiles, RAM, a big flight deck and four waterjets.
 - **Detail on every ship**: windows, portholes, railings, bollards, anchor chains, vents, life-raft racks, searchlights, antennas, rotating radars, waving flags bearing the full-color Codex robot or Claude Code mascot and crew on deck (the carrier's in their flight-deck jerseys). Hulls show their steel plating, each plate a slightly different shade, with rust weeping from seams and fittings and paint worn back at the edges.
 - **Ships under way**: each ship steams slowly ahead and astern on her own squares, rides the swell, and pushes real waves and a wake into the live water.
-- **Weapons that fit the ship**:
+- **Weapons that fit the ship**: who fires and with what is chosen at random for the show. It never changes the result, which comes only from the cell the model picked. The ship is a weighted pick among those still afloat, never the same one twice in a row, and the weapon is a random pick from that ship's list. The one fixed beat is the battle's second shot, the reply to the opening one, which is always the carrier's jet strike.
   - The battleship trains a turret and fires a three-gun broadside that heels the ship. It throws a fireball, a cloud of cordite smoke and a blast ring on the water, and the shells leave tracer streaks.
   - Cruisers ripple two missiles and the littoral combat ship fires one. Fire blows out of the launcher, and a dense smoke column climbs after the missile. The motor shows shock diamonds and lays a continuous, drifting smoke trail.
   - The submarine's missile breaches the surface.
@@ -73,6 +73,13 @@ Shots, hits, accuracy and thinking time are not shown during the match. They are
 
 ## Connections
 
+**Memory: per match, fresh each match.** Every move is a fresh request, so a model's memory is what the app writes into its prompt each turn. That memory is kept for the length of a match and starts empty with every new match. Each shot prompt carries:
+- the radar of what it knows about the enemy grid;
+- every shot it has fired this match, each with its result and the one-line reason it gave at the time (for example `Turn 7: D1 → HIT (you thought: "...")`);
+- the notes it wrote to itself on its last turn.
+
+Each answer must include updated notes (what it has learned about the enemy fleet and its plan, up to 600 characters), and these replace the old ones. The opponent never sees them. Scripted Test players don't use notes.
+
 Pick one under *Connection* on the setup screen, then pick a model for each fleet:
 
 - **Test** (default): the chosen models are shown, but their moves are simulated: no LLM calls and no keys. The simulation uses a probability map of where ships can still fit.
@@ -89,7 +96,7 @@ Pick one under *Connection* on the setup screen, then pick a model for each flee
 **How each move runs.** Every move is one self-contained turn:
 - **Claude:** runs with its tools off, no MCP servers, no slash commands and no saved session.
 - **Codex:** runs in a read-only sandbox, in an empty temporary folder, with network and web search off.
-- **Both:** must answer in a JSON schema (the cell, or each ship's start and direction) with one sentence of reasoning, which appears under the board. Codex keeps a record of each turn in `~/.codex/sessions`, as it does for every run.
+- **Both:** must answer in a JSON schema (the cell, or each ship's start and direction) with one sentence of reasoning, which appears under the board, and with a shot, its updated notes (see *Memory* above). Codex keeps a record of each turn in `~/.codex/sessions`, as it does for every run.
 
 **If something is missing.** If a tool is missing or not signed in, its fleet shows *Not available* and the setup screen says what to install.
 
@@ -119,7 +126,7 @@ OpenAI (blue fleet):
 
 Neither API offers a faster tier than Fast. *Default* effort sends no effort, so the model uses its own default; for GPT models the menu shows what that is.
 
-**How each move runs.** Every move is one request: the chosen effort and speed, and strict JSON-schema output (the cell, or each ship's start and direction) with one sentence of reasoning.
+**How each move runs.** Every move is one request: the chosen effort and speed, and strict JSON-schema output (the cell, or each ship's start and direction) with one sentence of reasoning and, with a shot, its updated notes.
 - **Claude:** Claude requests use adaptive thinking.
 - **Refusal fallback:** at standard speed, Opus 5.5, Opus 5, Sonnet 5.5 and Fable 5.1 also send Anthropic's server-side fallback (`fallbacks: "default"`). If the model declines a move on safety grounds, another model finishes the turn instead of the game stopping. Fast mode turns it off, because the fallback models don't all have fast mode.
 - **Errors:** rate limits, rejected keys and declined moves show as readable errors with a *Retry move* button.

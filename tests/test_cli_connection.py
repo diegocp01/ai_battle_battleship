@@ -24,7 +24,7 @@ if args == ['--help']:
     sys.exit(0)
 prompt = sys.stdin.read()
 with open(log, 'a') as f:
-    f.write(json.dumps({'tool': 'claude', 'args': args, 'nested': 'CLAUDECODE' in os.environ, 'cwd': os.getcwd()}) + '\n')
+    f.write(json.dumps({'tool': 'claude', 'args': args, 'nested': 'CLAUDECODE' in os.environ, 'cwd': os.getcwd(), 'prompt': prompt}) + '\n')
 if os.environ.get('FAKE_FAIL'):
     print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': True, 'result': 'Not logged in'}))
     sys.exit(1)
@@ -33,6 +33,12 @@ if 'plan' in schema['properties']:
     answer = {'Carrier': {'start': 'A1', 'direction': 'H'}, 'Battleship': {'start': 'A3', 'direction': 'H'},
               'Cruiser': {'start': 'A5', 'direction': 'H'}, 'Submarine': {'start': 'A7', 'direction': 'H'},
               'Destroyer': {'start': 'A9', 'direction': 'H'}, 'plan': 'Stacked along the west edge.'}
+elif os.environ.get('FAKE_MEMORY'):
+    import re
+    fired = re.search(r'CELLS ALREADY FIRED AT[^:]*: (.*)', prompt).group(1).split(', ')
+    target = next(c for c in ('E5', 'F6', 'G7', 'H8') if c not in fired)
+    turn = re.search(r'Turn (\d+)\.', prompt).group(1)
+    answer = {'target': target, 'reasoning': f'Reason for {target}.', 'notes': f'Notes written on turn {turn}.'}
 else:
     answer = {'target': 'E5', 'reasoning': 'Claude stand-in fires at the centre.'}
 print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': '', 'structured_output': answer}))
@@ -62,6 +68,10 @@ if 'plan' in request['schema']['properties']:
     answer = {'Carrier': {'start': 'J1', 'direction': 'V'}, 'Battleship': {'start': 'H1', 'direction': 'V'},
               'Cruiser': {'start': 'F1', 'direction': 'V'}, 'Submarine': {'start': 'D1', 'direction': 'V'},
               'Destroyer': {'start': 'B1', 'direction': 'V'}, 'plan': 'Columns on the east side.'}
+elif os.environ.get('FAKE_MEMORY'):
+    import re
+    fired = re.search(r'CELLS ALREADY FIRED AT[^:]*: (.*)', request['prompt']).group(1).split(', ')
+    answer = {'target': next(c for c in ('A1', 'B2', 'C3', 'D4') if c not in fired), 'reasoning': 'Codex stand-in.', 'notes': 'Codex notes.'}
 else:
     answer = {'target': 'A1', 'reasoning': 'Codex stand-in opens in the corner.'}
 print(json.dumps({'response': '```json\n' + json.dumps(answer) + '\n```', 'reasoning': ''}))
@@ -164,6 +174,32 @@ class CLIConnectionTest(unittest.TestCase):
         state = self.client.get('/api/game-state').get_json()
         self.assertEqual(state['turn'], 2)
         self.assertEqual(sum(len(p['shots']) for p in state['players'].values()), 2)
+
+    def test_memory_carries_through_the_match_and_resets(self):
+        os.environ['FAKE_MEMORY'] = '1'
+        # Play until Claude has fired twice.
+        self.client.post('/api/start-games', json={'mode': 'cli', 'gpt_model': 'gpt-6-luna', 'claude_model': 'claude-haiku-5-5'})
+        for _ in range(2):
+            self.client.post('/api/place-ships')
+        while len(self.client.get('/api/game-state').get_json()['players']['claude']['shots']) < 2:
+            self.assertEqual(self.client.post('/api/next-move').status_code, 200)
+        prompts = [c['prompt'] for c in self.calls() if c['tool'] == 'claude' and 'Turn ' in c['prompt']]
+        last = prompts[-1]
+        self.assertIn('YOUR MEMORY OF THIS MATCH', last)
+        self.assertRegex(last, r'Turn \d+: E5 → (MISS|HIT)')
+        self.assertIn('you thought: "Reason for E5."', last)
+        self.assertRegex(last, r'Your notes from your last turn:\nNotes written on turn \d+\.')
+        # A new match starts with a fresh memory.
+        self.client.post('/api/start-games', json={'mode': 'cli', 'gpt_model': 'gpt-6-luna', 'claude_model': 'claude-haiku-5-5'})
+        for _ in range(2):
+            self.client.post('/api/place-ships')
+        state = self.client.get('/api/game-state').get_json()
+        if state['current_player'] == 'gpt':
+            self.client.post('/api/next-move')
+        self.client.post('/api/next-move')
+        first = [c['prompt'] for c in self.calls() if c['tool'] == 'claude' and 'Turn ' in c['prompt']][-1]
+        self.assertIn('No shots yet. This is your first shot.', first)
+        self.assertIn('Your notes from your last turn:\nNone yet.', first)
 
     def test_illegal_placement_stops_the_match(self):
         import cli_players

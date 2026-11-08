@@ -24,14 +24,19 @@ FIRE_SCHEMA = {
     'properties': {
         'target': CELL,
         'reasoning': {'type': 'string', 'description': 'One sentence on why this cell.'},
+        'notes': {'type': 'string', 'description': 'Your notes to yourself for the rest of this match: what you have '
+                  'learned about the enemy fleet and your plan for the next shots, in a few short sentences. They '
+                  'replace your previous notes and are shown to you on your next turn.'},
     },
-    'required': ['target', 'reasoning'],
+    'required': ['target', 'reasoning', 'notes'],
     'additionalProperties': False,
 }
 PLACEMENT_SYSTEM = ('You are an admiral playing Battleship. Do not use any tools. Answer only with the requested JSON: '
                     'every ship\'s start cell and direction (H extends right, V extends down), and a one-sentence plan.')
 FIRE_SYSTEM = ('You are an admiral playing Battleship. Do not use any tools. Answer only with the requested JSON: one '
-               'cell to fire at that you have not fired at before, and one sentence explaining why.')
+               'cell to fire at that you have not fired at before, one sentence explaining why, and your updated notes '
+               'to yourself for the rest of the match.')
+NOTES_LIMIT = 600
 
 
 class MoveError(RuntimeError):
@@ -62,4 +67,6 @@ def read_placement(data):
 
 
 def read_shot(data):
-    return str(data.get('target') or ''), str(data.get('reasoning') or '').strip()
+    """(target, reasoning, notes) from a model's answer."""
+    notes = str(data.get('notes') or '').strip()[:NOTES_LIMIT]
+    return str(data.get('target') or ''), str(data.get('reasoning') or '').strip(), notes

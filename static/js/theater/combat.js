@@ -154,7 +154,12 @@ export class Combat {
         } else {
             impact = T.grid.cellCenter(defender, shot.target).add(new THREE.Vector3((Math.random() - .5) * .28, 0, (Math.random() - .5) * .28));
         }
-        const shooter = T.fleets[attacker]?.pickShooter();
+        // The opening shot is a random ship and weapon; the reply (the battle's second shot) is always the
+        // carrier's jet strike, while that carrier is afloat. After that it is random again.
+        const fleet = T.fleets[attacker];
+        const carrier = shot.turn === 2 ? fleet?.alive().find(ship => ship.type === 'Carrier') : null;
+        if (carrier) fleet.last = carrier;
+        const shooter = carrier || fleet?.pickShooter();
         // Cinematic mode covers every shot; the tactical view spends less time on a miss.
         const close = T.director.mode === 'cinematic' || shot.result !== 'miss' || Math.random() < .3;
         T.grid.lockOn(defender, shot.target, color);
@@ -165,7 +170,7 @@ export class Combat {
         const context = {shot, victim, impact};
         this.lastArrival = null;
         if (shooter) {
-            const weapon = shooter.weapons[Math.floor(Math.random() * shooter.weapons.length)];
+            const weapon = carrier ? 'strike' : shooter.weapons[Math.floor(Math.random() * shooter.weapons.length)];
             context.weapon = weapon;
             context.round = roundFor(weapon, shooter.type);
             // A shell can strike low on the hull, at the waterline, instead of the deck.
