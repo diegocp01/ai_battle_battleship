@@ -268,6 +268,8 @@ def place_ships():
         seat['placement'] = {name: {'start': cells[0], 'direction': 'H' if cells[0][1:] == cells[1][1:] else 'V'} for name, cells in fleet.items()}
         seat['ships'] = fleet
         seat['reasoning'] = reasoning or 'Fleet deployed.'
+        # The match memory begins here: the fleet as placed and the plan behind it come back in every shot prompt.
+        seat['plan'] = (reasoning or '')[:300]
         seat['last_time'] = elapsed
         seat['total_time'] += elapsed
         if all(state['players'][key]['ships'] for key in PLAYERS):

@@ -117,6 +117,7 @@ def new_player():
         'sunk': [],            # ships lost, in order
         'shots': [],           # shots this player fired: {'turn', 'target', 'result', 'ship', 'why'}
         'notes': '',           # the player's notes to itself, carried from one turn to the next in this match
+        'plan': '',            # what it said about its fleet when it placed it: where its match memory begins
     }
 
 
@@ -199,6 +200,15 @@ def fire_prompt(player_name, shooter, info, turn):
         return f"Turn {shot['turn']}: {shot['target']} → {result}" + (f' (you thought: "{why}")' if why else '')
     history = '\n'.join(entry(shot) for shot in shooter['shots']) or 'No shots yet. This is your first shot.'
     notes = (shooter.get('notes') or '').strip() or 'None yet.'
+    # Its own fleet as it placed it at the start, and what the enemy has done to it since.
+    fleet_lines = []
+    for name, cells in shooter['ships'].items():
+        spec = shooter['placement'].get(name, {})
+        hits = shooter['hits_taken'].get(name, [])
+        status = 'SUNK' if name in shooter['sunk'] else (f"hit at {', '.join(hits)}" if hits else 'untouched')
+        fleet_lines.append(f"{name} ({len(cells)}): {cells[0]}–{cells[-1]} ({spec.get('direction', '?')}), {status}")
+    fleet = '\n'.join(fleet_lines) or 'Not placed.'
+    plan = (shooter.get('plan') or '').strip()
     fired = ', '.join(sorted(info['fired'], key=lambda c: (to_index(c)[1], to_index(c)[0]))) or 'none'
     afloat = ', '.join(f'{name} ({SHIPS[name]})' for name in info['remaining'])
     sunk = ', '.join(info['sunk']) or 'none yet'
@@ -213,6 +223,9 @@ ENEMY SHIPS STILL AFLOAT: {afloat}
 ENEMY SHIPS SUNK: {sunk}
 
 YOUR MEMORY OF THIS MATCH
+Your fleet, as you placed it at the start of the match, and what the enemy has done to it:
+{fleet}{chr(10) + 'Your plan when you placed it: ' + plan if plan else ''}
+
 Every shot you have fired, what it hit, and what you were thinking:
 {history}
 

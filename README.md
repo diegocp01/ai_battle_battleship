@@ -73,7 +73,11 @@ Shots, hits, accuracy and thinking time are not shown during the match. They are
 
 ## Connections
 
-**Memory: per match, fresh each match.** Every move is a fresh request, so a model's memory is what the app writes into its prompt each turn. That memory is kept for the length of a match and starts empty with every new match. Each shot prompt carries:
+**Memory: per match, fresh each match.** Every move is a fresh request, so a model's memory is what the app writes into its prompt each turn. That memory is kept for the length of a match and starts empty with every new match. It begins at placement:
+- **Placement:** before the battle, each model gets one placement prompt (the side that will fire first deploys first). It answers with every ship's start cell and direction (H runs right, V runs down) and a one-sentence plan. The server checks the fleet is on the grid with no overlaps; an illegal fleet stops the match until the move is retried. Neither model ever sees the other's fleet.
+
+Each shot prompt carries:
+- its own fleet as it placed it at the start, with what the enemy has hit or sunk since, and the plan it gave when placing it;
 - the radar of what it knows about the enemy grid;
 - every shot it has fired this match, each with its result and the one-line reason it gave at the time (for example `Turn 7: D1 → HIT (you thought: "...")`);
 - the notes it wrote to itself on its last turn.
