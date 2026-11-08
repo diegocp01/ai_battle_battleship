@@ -1,0 +1,48 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Opening flyover sound review</title><link rel="icon" href="data:,">
+<script type="importmap">{"imports":{"three":"/static/vendor/three/three.module.js","three/addons/":"/static/vendor/three/addons/"}}</script>
+<style>body{margin:0;background:#101c25;color:white;font:14px system-ui}#theater{position:fixed;inset:0}aside{position:fixed;left:16px;top:16px;z-index:2;width:330px;background:#122938ed;padding:18px;border-radius:12px}h1{font-size:21px;margin:0 0 12px}button{padding:10px;margin:4px}pre{white-space:pre-wrap;color:#ace6c9;line-height:1.5}</style>
+<div id="theater"></div><aside><h1>Opening flyover · sound check</h1><button id="play" disabled>Play opening flyover</button><button id="reset" disabled>Reset flyover</button><button id="mute">Mute</button><pre id="status">Building fleets…</pre></aside>
+<script type="module">
+import {createTheater} from '/static/js/theater/index.js';
+const t=await createTheater(document.querySelector('#theater'));
+t.setCameraMode('tactical');t.env.setTime('afternoon');
+for(const team of ['gpt','claude'])await t.deploy(team,[{name:'Carrier',direction:'H',cells:['A3','B3','C3','D3','E3']}],{animate:false});
+t.air.clear();t.air.nextFlight=1e6;
+const status=document.querySelector('#status'), play=document.querySelector('#play'), reset=document.querySelector('#reset');
+let run=0;
+play.disabled=false;status.textContent='Ready. Uses the bundled ElevenLabs FX v3 jet engine recording.';
+play.onclick=async()=>{
+ const id=++run;play.disabled=true;reset.disabled=false;const lines=[];
+ const note=s=>{lines.push(s);status.textContent=lines.join('\n');};
+ try{
+  t.air.clear();
+  const opening=t.openingFlyover(), flights=[...t.air.flights];
+  if(!t.audio.ctx && flights.some(f=>f.jets.some(j=>j.engine)))throw Error('Created inert sound before unlock');
+  t.audio.unlock();t.audio.setMuted(false);document.querySelector('#mute').textContent='Mute';
+  t.air.update(.001,t.time);
+  await t.audio.ready;
+  if(id!==run)return;
+  t.air.update(.001,t.time);
+  if(flights.length!==2 || flights.some(f=>f.jets.length!==5||f.jets.some(j=>!j.engine?.active||!j.engine.recorded)))throw Error('Missing recorded formation sound');
+  note('PASS: all 10 jets have independent recorded v3 engine voices.');
+  if(t.audio.loopVoices.size!==10)throw Error('Expected exactly 10 formation voices');
+  note('PASS: late unlock / recording load recovered.');
+  await opening;if(id!==run)return;
+  if(flights.some(f=>f.jets.some(j=>!j.engine.active)))throw Error('Engine ended before departure');
+  note('PASS: engines continue after the opening ceremony resolves.');
+  await new Promise((resolve,reject)=>{
+   const started=performance.now();
+   function check(){
+    if(id!==run||flights.every(f=>!t.air.flights.includes(f)))return resolve();
+    if(performance.now()-started>30000)return reject(Error('Formation did not depart'));
+    requestAnimationFrame(check);
+   }check();
+  });
+  if(id!==run)return;
+  if(flights.some(f=>f.jets.some(j=>j.engine.active))||t.audio.loopVoices.size)throw Error('Engine survived departure');
+  note('PASS: all 10 engine loops stop when the jets leave.');
+ }catch(e){note('FAIL: '+e.message);}finally{if(id===run){play.disabled=false;reset.disabled=true;}}
+};
+reset.onclick=()=>{run++;t.air.clear();status.textContent=t.audio.loopVoices.size?'FAIL: reset left audio running':'PASS: reset stopped all 10 aircraft engine loops.';play.disabled=false;reset.disabled=true;};
+document.querySelector('#mute').onclick=e=>{t.setMuted(!t.audio.muted);e.target.textContent=t.audio.muted?'Unmute':'Mute';};
+</script></html>

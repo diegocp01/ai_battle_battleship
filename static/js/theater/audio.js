@@ -168,11 +168,12 @@ export class BattleAudio {
     // A moving, sustained sound belongs to the animation, not a guessed wall-clock duration.
     // Pitch stays natural when the battle slows; stop() is called at impact/reset.
     startLoop(kind, at, options = {}) {
-        const silent = {update() {}, stop() {}};
+        const silent = {active: false, recorded: false, update() {}, stop() {}};
         if (!this.ctx) return silent;
         const ctx = this.ctx, spec = SOUND_BANK[kind];
         const source = ctx.createBufferSource();
-        source.buffer = this.samples.get(kind) || (kind === 'jetEngine' ? this.brown : this.noise);
+        const recording = this.samples.get(kind);
+        source.buffer = recording || (kind === 'jetEngine' ? this.brown : this.noise);
         if (!source.buffer || !spec) return silent;
         source.loop = true;
         const filter = ctx.createBiquadFilter();
@@ -183,6 +184,9 @@ export class BattleAudio {
         panner.connect(wet).connect(this.reverb);
         let stopped = false;
         const voice = {
+            pool: options.pool === 'formation' ? 'formation' : 'cinematic',
+            get active() { return !stopped; },
+            recorded: Boolean(recording),
             update: (position, {level = 1, rate = 1, cutoff = 5000} = {}) => {
                 if (stopped) return;
                 const spatial = this.place(position), now = ctx.currentTime;
@@ -205,9 +209,11 @@ export class BattleAudio {
             this.loopVoices.delete(voice);
             for (const node of [source, filter, gain, panner, wet]) node.disconnect();
         };
-        if (this.loopVoices.size >= 4) this.loopVoices.values().next().value.stop();
+        // Ten opening aircraft must not steal the carrier's engine/cockpit voices.
+        const peers = [...this.loopVoices].filter(v => v.pool === voice.pool);
+        if (peers.length >= (voice.pool === 'formation' ? 10 : 4)) peers[0].stop();
         this.loopVoices.add(voice);
-        source.start();
+        source.start(0, Math.max(0, Math.min(.999, options.phase || 0)) * source.buffer.duration);
         voice.update(at, options);
         return voice;
     }

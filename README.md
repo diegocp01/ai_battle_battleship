@@ -142,6 +142,10 @@ The Test mode model lists are in `MODELS` in `players.py`.
 
 Compare the previous impact recordings with the new in-game mixes at `tests/impact-audio-browser.html`.
 
+### Opening flyover audio
+
+Both five-jet opening formations use the bundled ElevenLabs FX v3 engine recording throughout their approach, pass and departure. Audio follows their position, fades at the path ends, and keeps a smooth bounded Doppler pitch. A late audio unlock or recording download recovers while the jets are airborne; mute and reset remain effective. Each of the ten aircraft has an independently positioned voice, sample phase and slight pitch variation; wingmen pass later according to their V formation positions. Per-aircraft gain keeps the combined roar controlled while larger formations sound fuller. Formation voices have a separate budget from carrier/cockpit audio. Existing patrols clear before the ceremony. Verify with `tests/flyover-audio-browser.html`.
+
 ### Carrier cinematic audio
 
 The carrier's jet now has a continuous ElevenLabs v3 engine loop from spool-up to impact, with rising throttle on deck, a steam-catapult stroke and launch whistle, then moving engine audio through climb and flight. Cockpit shots add airflow and a warning tone while muffling the exterior engine. The engine and wind follow the animation and camera, so slow motion or a speed change cannot leave the jet flying silently. Impact and reset stop the loops; mute still applies. `tests/carrier-audio-browser.html` provides a local launch and reset check.

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { FIGHTERS, fighterDecals } from './ships.js';
 import { place, box, cyl } from './shipkit.js';
+import { flightDoppler, flightEngine } from './flight-audio.js';
 
 // Life in the air: a Black Hawk helicopter flying a lazy circuit round each fleet, rotors turning, and now and then
 // a flyover by both fleets' fighters at once: each fleet's formation straight down the length of its own board,
@@ -284,7 +285,7 @@ export class AirTraffic {
         for (const jet of flight.jets) this.scene.remove(jet.group);
         for (const jet of flight.jets) for (const plume of jet.plumes) plume.material.dispose();
         for (const jet of flight.jets) for (const trail of jet.trails) trail.ended = true;
-        flight.engine?.stop();
+        for (const jet of flight.jets) jet.engine?.stop();
     }
 
     // A fighter of the team's, with its two plumes and (when the pass leaves them) two vapor trails, or coloured
@@ -357,8 +358,7 @@ export class AirTraffic {
         const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
         const length = curve.getLength();
         const jets = Array.from({length: count}, () => this.makeJet(team, trails, kind !== 'along', options.trailStyle));
-        const flight = {kind, team, curve, length, speed, jets, burner, d: 0};
-        flight.engine = this.t.audio?.startLoop('jetEngine', points[0], {level: 0}) || null;
+        const flight = {kind, team, curve, length, speed, jets, burner, opening: Boolean(options.opening), d: 0};
         this.flights.push(flight);
         return flight;
     }
@@ -397,11 +397,14 @@ export class AirTraffic {
     // their fleet's colour, then pulling up over the near end. Resolves as they cross the middle of the boards.
     inaugurate() {
         this.ceremony?.resolve();
+        // Retire existing patrols so both opening formations have an audio voice.
+        for (const flight of this.flights) this.endFlight(flight);
+        this.flights = [];
         const colors = {gpt: 0x6f9bff, claude: 0xff8a52};
         const flights = ['gpt', 'claude'].map(team => {
             const x = this.t.grid.center(team).x;
             return this.launchFlight('along', {
-                team, count: 5, trails: true, burner: false, speed: 6,
+                team, count: 5, trails: true, burner: false, speed: 6, opening: true,
                 points: [[x, 2.8, -46], [x, 2.5, -20], [x, 2.4, 0], [x, 2.6, 12], [x, 5, 34]],
                 trailStyle: {width: .026, spread: .3, life: 16, opacity: .55, color: colors[team]},
             });
@@ -437,6 +440,8 @@ export class AirTraffic {
         // Throttle: cruise on a pass, more power climbing, the burners on a burner pass or a hard pull-up.
         const throttle = flight.burner ? 1 : THREE.MathUtils.clamp(.45 + lead.climb * 3.5, .4, 1);
         const camera = this.t.camera;
+        const fade = Math.min(1, flight.d / 3, (flight.length - flight.d) / 5);
+        const presence = flight.opening ? 1.2 : 1;
         flight.jets.forEach((jet, i) => {
             // The V: each pair of wingmen further back and out, stepped down a little; each holds station with a
             // small drift of its own.
@@ -449,6 +454,24 @@ export class AirTraffic {
             jet.group.position.copy(lead.at).add(offset);
             jet.group.quaternion.copy(quaternion);
             jet.group.updateMatrixWorld();
+            // Each aircraft carries its own roar: the V's wingmen pass the listener
+            // slightly later, from different directions, with independent sample phases.
+            const voiceIndex = i + (flight.team === 'claude' ? 5 : 0);
+            jet.engine = flightEngine(this.t.audio, jet.engine, jet.group.position, voiceIndex);
+            if (jet.engine && camera) {
+                const towardListener = camera.position.clone().sub(jet.group.position).normalize();
+                const closing = lead.nose.dot(towardListener) * flight.speed;
+                const doppler = flightDoppler(closing, SOUND_SPEED);
+                // Exhaust projects aft. Keep the approaching turbine audible, then
+                // expose more low-frequency roar as the aircraft passes the camera.
+                const aft = (1 - lead.nose.dot(towardListener)) * .5;
+                const detune = 1 + ((voiceIndex * .381966) % 1 - .5) * .024;
+                jet.engine.update(jet.group.position, {
+                    level: .45 * fade * presence * (.55 + .45 * throttle) * (.75 + .25 * aft),
+                    rate: .82 * doppler * detune,
+                    cutoff: (2600 + 3400 * throttle) * (1 - .22 * aft),
+                });
+            }
             for (const plume of jet.plumes) {
                 const u = plume.material.uniforms;
                 u.uThrottle.value += (throttle - u.uThrottle.value) * Math.min(1, dt * 2);
@@ -457,13 +480,6 @@ export class AirTraffic {
             }
             jet.trails.forEach((trail, k) => trail.add(jet.group.localToWorld(jet.sources[k].clone().add(new THREE.Vector3(-.03, 0, 0))), this.clock));
         });
-        // The roar, Doppler-shifted by how fast the lead closes on the camera.
-        if (flight.engine && camera) {
-            const velocity = lead.nose.clone().multiplyScalar(flight.speed);
-            const closing = velocity.dot(camera.position.clone().sub(lead.at).normalize());
-            const doppler = THREE.MathUtils.clamp(1 / (1 - closing / SOUND_SPEED), .55, 1.9);
-            flight.engine.update(lead.at, {level: (.55 + .45 * throttle) * Math.min(1, flight.jets.length / 3 + .4), rate: .82 * doppler, cutoff: 2600 + 3400 * throttle});
-        }
         return true;
     }
 
