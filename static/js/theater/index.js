@@ -658,6 +658,11 @@ export class Theater {
         await this.combat.celebrate(team);
     }
 
+    // Both fleets deployed: the fighters fly down their boards to open the battle (resolves as they pass).
+    openingFlyover() {
+        return this.air.inaugurate();
+    }
+
     // The setup page: both fleets at anchor, the camera circling, the odd ranging shot.
     async setAttract(on) {
         this.attract = on;

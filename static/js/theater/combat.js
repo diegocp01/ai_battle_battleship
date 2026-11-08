@@ -4,6 +4,7 @@ import { jetMesh } from './ships.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { WALL, WALL_CLEARANCE } from './wall.js';
 import { deckCrew, directorPose, shooterPose, CockpitHud } from './flightdeck.js';
+import { planStrikeRoute } from './strike-route.js';
 
 // How a shot plays out. The attacking fleet picks a ship that is still afloat and uses its weapon: the
 // battleship trains a turret and fires a three-gun salvo, cruisers and destroyers fire their 5-inch gun or
@@ -46,6 +47,27 @@ export class Combat {
         const bombBand = new THREE.CylinderGeometry(.0065, .0065, .002, 14).rotateZ(Math.PI / 2).translate(.016, 0, 0);
         this.bombGeometry = mergeGeometries([bombBody, bombNose, bombBand, ...bombFins].map(g => g.toNonIndexed()));
         this.bombMaterial = new THREE.MeshStandardMaterial({color: 0x5a5e46, roughness: .55, metalness: .25});
+        // A naval shell, one unit long (about 4.5 calibres), nose toward +x: boat-tailed base, parallel body, the
+        // long ogive nose, and the copper driving band near the base. Painted steel.
+        const profile = [[0, 0], [.088, 0], [.104, .05], [.111, .09], [.111, .55]];
+        for (let i = 1; i <= 10; i++) {
+            const t = i / 10;
+            profile.push([.111 * Math.sqrt(Math.max(0, 1 - t * t)) * (1 - .08 * t), .55 + .45 * t]);
+        }
+        const lathe = (points) => new THREE.LatheGeometry(points.map(([r, y]) => new THREE.Vector2(r, y)), 16).translate(0, -.5, 0).rotateZ(-Math.PI / 2);
+        this.shellGeometry = lathe(profile);
+        this.shellBandGeometry = new THREE.CylinderGeometry(.116, .116, .045, 16, 1, true).translate(0, .13 - .5, 0).rotateZ(-Math.PI / 2);
+        this.shellMaterial = new THREE.MeshStandardMaterial({color: 0x56595a, roughness: .42, metalness: .55});
+        this.shellBandMaterial = new THREE.MeshStandardMaterial({color: 0xb36a3a, roughness: .35, metalness: .85});
+    }
+
+    // A shell of the given length in squares, drawn about three times its real size so it can be seen in flight:
+    // a 16-inch round (1.8 m) at .073, a 5-inch (0.66 m) at .027, a 57 mm (0.5 m) at .02.
+    shellMesh(length) {
+        const group = new THREE.Group();
+        group.add(new THREE.Mesh(this.shellGeometry, this.shellMaterial), new THREE.Mesh(this.shellBandGeometry, this.shellBandMaterial));
+        group.scale.setScalar(length);
+        return group;
     }
 
     // ---------------------------------------------------------------------------------------------------
@@ -183,7 +205,7 @@ export class Combat {
             // A turn always lands, even if an animation were to stall.
             await Promise.race([this[weapon](shooter, impact, context), T.wait(14)]);
         } else {
-            await this.fly({kind: 'shell', path: this.ballistic(origin.clone().setY(.3), impact, 3), duration: 1.4, primary: true});
+            await this.fly({kind: 'shell', path: this.ballistic(origin.clone().setY(.3), impact, 3), duration: 1.4, primary: true, mesh: this.shellMesh(.027)});
         }
         if (epoch !== this.epoch) return;
         T.grid.release();
@@ -308,7 +330,7 @@ export class Combat {
             const target = i === 1 ? impact : impact.clone().add(offsets[i]);
             if (i !== 1) target.y = 0;
             const {duration, height} = this.shellFlight(start, target, 1.3);
-            const flight = this.fly({kind: 'shell', path: this.ballistic(start, target, height), duration: duration + i * .05, primary: i === 1});
+            const flight = this.fly({kind: 'shell', path: this.ballistic(start, target, height), duration: duration + i * .05, primary: i === 1, mesh: this.shellMesh(.073)});
             if (i === 1) T.audio.play('whistle', target, duration * .9);
             else flight.then((at) => T.effects.waterImpact(at, {velocity: at.velocity, ...ROUNDS.salvo, sound: i === 0}));
             arrivals.push(flight);
@@ -366,7 +388,7 @@ export class Combat {
         T.director.addShake(start, .2);
         const {duration, height} = this.shellFlight(start, impact, .8);
         T.audio.play('whistle', impact, duration * .9);
-        await this.fly({kind: 'shell', path: this.ballistic(start, impact, height), duration, primary: true});
+        await this.fly({kind: 'shell', path: this.ballistic(start, impact, height), duration, primary: true, mesh: this.shellMesh(ship.type === 'Destroyer' ? .02 : .027)});
     }
 
     async missile(ship, impact, context) {
@@ -543,22 +565,20 @@ export class Combat {
         const deckCamera = carrier.body.localToWorld(cat.start.clone().lerp(cat.end, .72).add(new THREE.Vector3(0, .026, -.17)));
         T.director.cueStrike('catapult', {start: deckStart.clone(), end: deckEnd.clone(), forward, camera: deckCamera});
         T.audio.play('catapult', deckStart);
-        const toward = impact.clone().sub(deckEnd).setY(0).normalize();
-        const side = new THREE.Vector3().crossVectors(toward, UP).multiplyScalar(Math.random() < .5 ? 1 : -1);
+        // Its route to the wall is planned from where the carrier lies and which way she points: off the bow, a
+        // turn the shorter way round (or away from the wall and back, when the short way would swing over it
+        // low), straight at the wall and over it, climbing all the way (strike-route.js).
+        const route = planStrikeRoute({deckEnd: deckEnd.toArray(), forward: forward.toArray(), impact: impact.toArray(), wallTop: WALL_CLEARANCE});
+        const over = new THREE.Vector3(...route.gate);
+        const toward = impact.clone().sub(over).setY(0).normalize();
         const outward = Math.sign(impact.x) || 1;
-        const over = new THREE.Vector3(0, WALL_CLEARANCE + 1.3, (deckEnd.z + impact.z) / 2).addScaledVector(side, .8);
-        over.x = 0;
         // Where it pushes over into the dive: on the far side of the wall, however close to it the target is,
         // about 40 degrees above the target. From there it is a straight dive.
         const rollIn = impact.clone().addScaledVector(toward, -2.6).setY(impact.y + 2.2);
         if (rollIn.x * outward < 1.2) rollIn.x = outward * 1.2;
-        const climb = deckEnd.clone().lerp(over, .5).setY(WALL_CLEARANCE * .8).addScaledVector(side, 1.2);
         const curve = new THREE.CatmullRomCurve3([
             deckStart,
-            deckEnd,
-            deckEnd.clone().addScaledVector(forward, 1.5).add(new THREE.Vector3(0, .6, 0)),
-            climb,
-            over,
+            ...route.points.map(point => new THREE.Vector3(...point)),
             rollIn,
             rollIn.clone().lerp(impact, .5),
             rollIn.clone().lerp(impact, .8),
@@ -796,7 +816,7 @@ export class Combat {
         T.effects.muzzle(start, new THREE.Vector3(1, 0, 0).transformDirection(muzzle.matrixWorld), turret.kind === 'main' ? 1.1 : .7);
         T.audio.play('cannon', start, .7);
         const {duration, height} = this.shellFlight(start, impact, 1);
-        const at = await this.fly({kind: 'shell', path: this.ballistic(start, impact, height), duration});
+        const at = await this.fly({kind: 'shell', path: this.ballistic(start, impact, height), duration, mesh: this.shellMesh(turret.kind === 'main' ? .073 : .027)});
         T.effects.waterImpact(at, {velocity: at.velocity, ...ROUNDS.gun});
     }
 }

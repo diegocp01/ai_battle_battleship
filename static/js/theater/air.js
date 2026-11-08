@@ -68,8 +68,14 @@ const TRAIL_MATERIAL = new THREE.MeshBasicMaterial({color: 0xe8edf3, vertexColor
 // One engine's vapor trail: a ribbon through the points it passed, facing the camera, thin at the engine and
 // spreading as it ages, drifting downwind and fading out.
 class Trail {
-    constructor(scene, {width = .01, spread = .1, life = 11, opacity = .5, max = 280} = {}) {
+    constructor(scene, {width = .01, spread = .1, life = 11, opacity = .5, max = 280, color = null} = {}) {
         Object.assign(this, {scene, width, spread, life, opacity, max});
+        // Vapor is white; the opening flyover trails smoke in its fleet's colour.
+        this.material = TRAIL_MATERIAL;
+        if (color !== null) {
+            this.material = TRAIL_MATERIAL.clone();
+            this.material.color.set(color);
+        }
         this.points = [];
         this.position = new Float32Array(max * 6);
         this.color = new Float32Array(max * 8);
@@ -82,7 +88,7 @@ class Trail {
         geometry.setAttribute('color', new THREE.BufferAttribute(this.color, 4).setUsage(THREE.DynamicDrawUsage));
         geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
         geometry.setDrawRange(0, 0);
-        this.mesh = new THREE.Mesh(geometry, TRAIL_MATERIAL);
+        this.mesh = new THREE.Mesh(geometry, this.material);
         this.mesh.frustumCulled = false;
         this.mesh.renderOrder = 4;
         scene.add(this.mesh);
@@ -127,6 +133,7 @@ class Trail {
     dispose() {
         this.scene.remove(this.mesh);
         this.mesh.geometry.dispose();
+        if (this.material !== TRAIL_MATERIAL) this.material.dispose();
     }
 }
 
@@ -263,6 +270,8 @@ export class AirTraffic {
     }
 
     clear() {
+        this.ceremony?.resolve();
+        this.ceremony = null;
         for (const flight of this.flights) this.endFlight(flight);
         for (const trail of this.trails) trail.dispose();
         this.flights = [];
@@ -277,8 +286,9 @@ export class AirTraffic {
         flight.engine?.stop();
     }
 
-    // A fighter of the team's, with its two plumes and (when the pass leaves them) two vapor trails.
-    makeJet(team, trails, high) {
+    // A fighter of the team's, with its two plumes and (when the pass leaves them) two vapor trails, or coloured
+    // smoke (style: {color, ...}).
+    makeJet(team, trails, high, style = null) {
         const group = new THREE.Group();
         for (const part of this.jetParts[team]) group.add(new THREE.Mesh(part.geometry, part.material));
         group.traverse(o => { if (o.isMesh) o.castShadow = true; });
@@ -295,13 +305,17 @@ export class AirTraffic {
             return plume;
         });
         this.scene.add(group);
-        const made = trails ? this.nozzles.map(() => new Trail(this.scene, high ? {width: .012, spread: .16, life: 14, opacity: .55} : {width: .01, spread: .09, life: 9, opacity: .42})) : [];
+        const look = style || (high ? {width: .012, spread: .16, life: 14, opacity: .55} : {width: .01, spread: .09, life: 9, opacity: .42});
+        // Vapor forms behind each engine; display smoke comes from one generator in the tail.
+        const sources = style?.color !== undefined ? [this.nozzles[0].clone().lerp(this.nozzles[1], .5)] : this.nozzles;
+        const made = trails ? sources.map(() => new Trail(this.scene, look)) : [];
         this.trails.push(...made);
-        return {group, plumes, trails: made, jitter: Math.random() * 10};
+        return {group, plumes, trails: made, sources, jitter: Math.random() * 10};
     }
 
     // A flight of the fleet's fighters. Kinds: a V low down one board, parallel to the barrier; a V across both
-    // boards above the barrier; a pair high over the battle. options can set {team, trails, burner, count}.
+    // boards above the barrier; a pair high over the battle. options can set {team, trails, burner, count}, and a
+    // path of its own: {points: [[x, y, z]...], speed, trailStyle}.
     launchFlight(kind, options = {}) {
         const r = Math.random;
         kind = kind || (r() < .45 ? 'along' : r() < .55 ? 'across' : 'patrol');
@@ -337,14 +351,34 @@ export class AirTraffic {
             trails = r() < .7;
             burner = false;
         }
-        ({count = count, trails = trails, burner = burner} = options);
+        ({count = count, trails = trails, burner = burner, speed = speed} = options);
+        if (options.points) points = options.points.map(([px, py, pz]) => new THREE.Vector3(px, py, pz));
         const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
         const length = curve.getLength();
-        const jets = Array.from({length: count}, () => this.makeJet(team, trails, kind !== 'along'));
+        const jets = Array.from({length: count}, () => this.makeJet(team, trails, kind !== 'along', options.trailStyle));
         const flight = {kind, team, curve, length, speed, jets, burner, d: 0};
         flight.engine = this.t.audio?.startLoop('jetEngine', points[0], {level: 0}) || null;
         this.flights.push(flight);
         return flight;
+    }
+
+    // The opening flyover, once both fleets are deployed and before the first shot: each fleet's fighters in a V
+    // straight down the length of its own board, side by side on either side of the barrier, trailing smoke in
+    // their fleet's colour, then pulling up over the near end. Resolves as they cross the middle of the boards.
+    inaugurate() {
+        this.ceremony?.resolve();
+        const colors = {gpt: 0x6f9bff, claude: 0xff8a52};
+        const flights = ['gpt', 'claude'].map(team => {
+            const x = this.t.grid.center(team).x;
+            return this.launchFlight('along', {
+                team, count: 5, trails: true, burner: false, speed: 6,
+                points: [[x, 2.8, -46], [x, 2.5, -20], [x, 2.4, 0], [x, 2.6, 12], [x, 5, 34]],
+                trailStyle: {width: .026, spread: .3, life: 16, opacity: .55, color: colors[team]},
+            });
+        });
+        // A flight on patrol is called off for the ceremony.
+        this.nextFlight = Math.max(this.nextFlight, 40);
+        return new Promise(resolve => { this.ceremony = {flights, resolve, t: 0}; });
     }
 
     // Where the lead is along its path and how it is flying: position, velocity and its axes (nose, up, right),
@@ -391,7 +425,7 @@ export class AirTraffic {
                 u.uTime.value = this.clock;
                 plume.scale.x = (.025 + .1 * u.uThrottle.value * u.uThrottle.value) * 1.15;
             }
-            jet.trails.forEach((trail, k) => trail.add(jet.group.localToWorld(this.nozzles[k].clone().add(new THREE.Vector3(-.03, 0, 0))), this.clock));
+            jet.trails.forEach((trail, k) => trail.add(jet.group.localToWorld(jet.sources[k].clone().add(new THREE.Vector3(-.03, 0, 0))), this.clock));
         });
         // The roar, Doppler-shifted by how fast the lead closes on the camera.
         if (flight.engine && camera) {
@@ -435,6 +469,16 @@ export class AirTraffic {
             this.endFlight(flight);
             return false;
         });
+        // The battle starts as the ceremony's fighters cross the middle of the boards.
+        const ceremony = this.ceremony;
+        if (ceremony) {
+            ceremony.t += dt;
+            const lead = ceremony.flights[0].jets[0].group.position;
+            if (lead.z >= 0 || ceremony.t > 14 || !this.flights.includes(ceremony.flights[0])) {
+                this.ceremony = null;
+                ceremony.resolve();
+            }
+        }
         const camera = this.t.camera;
         this.trails = this.trails.filter(trail => {
             if (camera) trail.update(this.clock, dt, camera, this.wind);

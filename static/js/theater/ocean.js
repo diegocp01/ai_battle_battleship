@@ -307,9 +307,10 @@ void main() {
         float coreWidth = .02;
         float w = max(coreWidth, px * .8);
         float core = (1. - smoothstep(w - px * .6, w + px * .6, d)) * min(1., coreWidth / w * 1.4);
-        float halo = exp(-d / .045) * .8 + exp(-d / .16) * .1;
-        vec3 neon = mix(gridColor, vec3(1.), .14);
-        color += (neon * core * 2.6 + gridColor * gridColor * halo * facet * 1.25 * (inside ? 1. : .8)) * uGridOpacity * distanceFade;
+        // (Toned down by about a third: a lit border, not a blinding one.)
+        float halo = exp(-d / .045) * .55 + exp(-d / .16) * .07;
+        vec3 neon = mix(gridColor, vec3(1.), .08);
+        color += (neon * core * 1.7 + gridColor * gridColor * halo * facet * .95 * (inside ? 1. : .8)) * uGridOpacity * distanceFade;
         if (inside) {
             // Cell lines: thin, cool white, fading out before they could shimmer.
             vec2 f = fract(local);
