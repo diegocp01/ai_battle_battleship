@@ -5,6 +5,7 @@ import {
 } from './shipkit.js';
 import { steelDeckTexture, teakDeckTexture, flightDeckTexture, hullNumberTexture } from './textures.js';
 import { sailor, crewGroup, windowRow, windowsAround, portholes, deckFittings, vents, raftRack, whips, roofRail, outlineRail, anchorGear, canisterLauncher, torpedoTubes, latticeMast, searchlight, ewArrays, stealthJet, hawkeye, seahawk, tugParts, FIGHTER_RIDE_HEIGHT } from './detail.js';
+import { carrierSailor } from './flightdeck.js';
 import { DeckCargo } from './deck-cargo.js';
 // Each fleet's fighter, after the references: stealth fighters in the fleet's paint, with its trim and glow
 // colors, the badge on its intakes (a glowing >_ for Codex, the mascot for Claude) and its logo on the tails.
@@ -607,7 +608,7 @@ function carrier(b) {
     // The flight deck crew, in their jerseys: at the catapult, round the parked jets, by the island and the fuel.
     const jerseys = ['yellow', 'crewPurple', 'crewGreen', 'crewRed', 'crewBrown', 'white', 'crewBlue'];
     for (const [x, z, n] of [[1.0, -.2, 4], [1.45, .1, 3], [2.15, .1, 2], [1.75, .2, 3], [1.3, .3, 3], [.45, .24, 3], [-.15, .3, 4], [-.62, .27, 2], [-1.05, .26, 4], [-1.5, .27, 3], [-1.85, .1, 3], [-2.15, .16, 2], [.9, .3, 2]]) {
-        crewGroup(b, x, top, z, jerseys, n, .04);
+        crewGroup(b, x, top, z, jerseys, n, .04, carrierSailor);
     }
     // Hangar openings under the overhang, deck-edge antennas folded outboard, sponsons with launchers and CIWS.
     for (const x of [.95, .35, -1.25]) b.add('black', box(.22, .05, .003), [x, .13, hullSide(P, x, .13) + .0016]);

@@ -360,10 +360,10 @@ export function sailor(b, x, y, z, material) {
 }
 
 // A handful of sailors scattered round a point.
-export function crewGroup(b, x, y, z, materials, count = 3, spread = .03) {
+export function crewGroup(b, x, y, z, materials, count = 3, spread = .03, makeSailor = sailor) {
     for (let i = 0; i < count; i++) {
         const a = rand() * Math.PI * 2, d = Math.sqrt(rand()) * spread;
-        sailor(b, x + Math.cos(a) * d, y, z + Math.sin(a) * d * .7, materials[Math.floor(rand() * materials.length)]);
+        makeSailor(b, x + Math.cos(a) * d, y, z + Math.sin(a) * d * .7, materials[Math.floor(rand() * materials.length)]);
     }
 }
 
