@@ -464,6 +464,7 @@ export function shipMaterials(shared, ship, textures) {
         crewPurple: paint(0x5b3b8c, .8, 0),
         crewGreen: paint(0x3f7d3a, .8, 0),
         crewRed: paint(0xa8261d, .8, 0),
+        crewSkin: paint(0xb07a58, .7, 0),
         crewBrown: paint(0x6b4a2c, .8, 0),
         crewBlue: paint(0x2b3f63, .8, 0),
         lightRed: new THREE.MeshBasicMaterial({color: new THREE.Color(1, .08, .05).multiplyScalar(6)}),

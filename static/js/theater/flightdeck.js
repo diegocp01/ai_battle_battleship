@@ -10,6 +10,7 @@ import * as THREE from 'three';
 
 const SKIN = new THREE.MeshStandardMaterial({color: 0xb07a58, roughness: .7});
 const BOOTS = new THREE.MeshStandardMaterial({color: 0x1b1b1c, roughness: .8});
+const REFLECTIVE = new THREE.MeshStandardMaterial({color: 0xd5d8cc, roughness: .65});
 const TROUSERS = new THREE.MeshStandardMaterial({color: 0x3c4148, roughness: .85});
 // The lit wands: brighter than white, so they bloom like the real thing.
 const WAND = new THREE.MeshBasicMaterial({color: new THREE.Color(5, 2.1, .35), toneMapped: false});
@@ -19,39 +20,71 @@ function capsule(radius, length, material) {
 }
 
 // One crew member, facing +x, feet at the origin. jersey: their job's color.
-export function deckCrew(jersey, helmet) {
+export function deckCrew(jersey, helmet, {wands = true} = {}) {
     const group = new THREE.Group();
+    const mesh = (name, geometry, material, position, scale = [1, 1, 1]) => {
+        const part = new THREE.Mesh(geometry, material);
+        part.name = name;
+        part.position.set(...position);
+        part.scale.set(...scale);
+        group.add(part);
+        return part;
+    };
+    // Separate legs and a narrower waist give a human silhouette rather than a single pill.
     for (const side of [-1, 1]) {
-        const leg = capsule(.0014, .0075, TROUSERS);
-        leg.position.set(0, .0052, side * .0017);
-        group.add(leg);
-        const boot = new THREE.Mesh(new THREE.BoxGeometry(.0032, .0012, .0017), BOOTS);
-        boot.position.set(.0006, .0006, side * .0017);
-        group.add(boot);
+        mesh('trouser-leg', new THREE.CapsuleGeometry(.00125, .0066, 3, 8), TROUSERS,
+            [0, .0056, side * .00165]);
+        mesh('boot', new THREE.BoxGeometry(.0035, .0015, .0022), BOOTS,
+            [.00065, .00075, side * .00165]);
     }
-    const torso = capsule(.0031, .0055, jersey);
-    torso.position.y = .0142;
-    torso.scale.z = 1.25;
-    group.add(torso);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(.0022, 10, 8), SKIN);
-    head.position.y = .0214;
-    group.add(head);
-    // The cranial: a hard shell with ear defenders.
-    const cranial = new THREE.Mesh(new THREE.SphereGeometry(.0025, 10, 8, 0, Math.PI * 2, 0, Math.PI * .55), helmet);
-    cranial.position.y = .0216;
-    group.add(cranial);
+    mesh('hips', new THREE.SphereGeometry(.0026, 10, 8), TROUSERS, [0, .010, 0], [.72, .65, 1.12]);
+    const torso = mesh('jersey', new THREE.SphereGeometry(.003, 12, 10), jersey,
+        [0, .0143, 0], [.72, 1.32, 1.18]);
+    for (const side of [-1, 1]) {
+        mesh('shoulder-cap', new THREE.SphereGeometry(.00165, 10, 8), jersey,
+            [0, .0175, side * .0029], [.85, 1, 1]);
+    }
+    mesh('belt', new THREE.BoxGeometry(.0039, .0007, .0056), BOOTS, [0, .0108, 0]);
+    // Float-coat straps and reflective patches follow the front (+x) and back of the jersey.
+    for (const side of [-1, 1]) {
+        mesh('vest-strap', new THREE.BoxGeometry(.00035, .005, .00055), BOOTS,
+            [.00205, .0147, side * .0017]);
+        mesh('reflector', new THREE.BoxGeometry(.0003, .0006, .0011), REFLECTIVE,
+            [.0023, .0162, side * .0017]);
+    }
+    mesh('back-reflector', new THREE.BoxGeometry(.0003, .0006, .004), REFLECTIVE, [-.0021, .0155, 0]);
+    mesh('neck', new THREE.CylinderGeometry(.0008, .001, .0017, 8), SKIN, [0, .0188, 0]);
+    mesh('head', new THREE.SphereGeometry(.0019, 12, 10), SKIN,
+        [.0001, .021, 0], [.9, 1.22, .88]);
+    mesh('nose', new THREE.SphereGeometry(.0005, 8, 6), SKIN, [.0018, .021, 0], [1, .8, .7]);
+    mesh('goggles', new THREE.SphereGeometry(.001, 10, 6), BOOTS,
+        [.00155, .02165, 0], [.45, .5, 1.55]);
+    mesh('cranial', new THREE.SphereGeometry(.00205, 12, 8, 0, Math.PI * 2, 0, Math.PI * .52), helmet,
+        [0, .02145, 0], [1, 1, .95]);
+    for (const side of [-1, 1]) {
+        mesh('ear-defender', new THREE.SphereGeometry(.0009, 8, 6), BOOTS,
+            [0, .0213, side * .00185], [1, 1.25, .5]);
+        mesh('chin-strap', new THREE.BoxGeometry(.0004, .0019, .0003), BOOTS,
+            [.00035, .0199, side * .00135]);
+    }
     const arms = [-1, 1].map(side => {
         const shoulder = new THREE.Group();
+        // Keep the animation's shoulder pivots, hand position and wand tips unchanged.
         shoulder.position.set(0, .0182, side * .0042);
-        const arm = capsule(.0011, .0078, jersey);
-        arm.position.y = -.0045;
-        shoulder.add(arm);
-        const hand = new THREE.Mesh(new THREE.SphereGeometry(.0011, 6, 4), SKIN);
+        const sleeve = capsule(.0012, .0025, jersey);
+        sleeve.position.y = -.002;
+        shoulder.add(sleeve);
+        const forearm = capsule(.00085, .0028, SKIN);
+        forearm.position.set(.00015, -.006, 0);
+        shoulder.add(forearm);
+        const hand = new THREE.Mesh(new THREE.SphereGeometry(.00095, 8, 6), SKIN);
         hand.position.y = -.0092;
         shoulder.add(hand);
-        const wand = new THREE.Mesh(new THREE.CylinderGeometry(.0007, .0007, .0068, 6), WAND);
-        wand.position.y = -.0128;
-        shoulder.add(wand);
+        if (wands) {
+            const wand = new THREE.Mesh(new THREE.CylinderGeometry(.0007, .0007, .0068, 6), WAND);
+            wand.position.y = -.0128;
+            shoulder.add(wand);
+        }
         const tip = new THREE.Object3D();
         tip.position.y = -.016;
         shoulder.add(tip);
@@ -60,6 +93,25 @@ export function deckCrew(jersey, helmet) {
     });
     group.traverse(o => { if (o.isMesh && o.material !== WAND) o.castShadow = true; });
     return {group, arms, torso};
+}
+
+// Reuse the close-up model for the carrier's static crew. Geometry is still merged into the hull's
+// material buckets, so a detailed person does not add a draw call for every body part.
+export function carrierSailor(b, x, y, z, material) {
+    const crew = deckCrew(b.materials[material], b.materials[material], {wands: false});
+    // Coordinate-derived variation never consumes the procedural ship generator's random stream.
+    const variation = Math.abs(Math.sin(x * 127.1 + z * 311.7));
+    crew.group.rotation.y = variation * Math.PI * 2;
+    setArm(crew.arms[0], .12 + variation * .4, .08, -1);
+    setArm(crew.arms[1], .2 + (1 - variation) * .6, .1, 1);
+    crew.group.updateMatrixWorld(true);
+    const keys = new Map([[b.materials[material], material], [SKIN, 'crewSkin'],
+        [BOOTS, 'black'], [TROUSERS, 'dark'], [REFLECTIVE, 'white']]);
+    crew.group.traverse(part => {
+        if (!part.isMesh) return;
+        b.add(keys.get(part.material), part.geometry.clone().applyMatrix4(part.matrixWorld), [x, y, z]);
+        part.geometry.dispose();
+    });
 }
 
 // Arm angles: lift is how far the arm swings forward and up (0 down by the side, PI straight overhead), spread
