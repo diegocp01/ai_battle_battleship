@@ -4,7 +4,9 @@ import {
     hullGeometry, hullProfile, deckGeometry, railGeometry, shipMaterials, flagMaterial, lerp,
 } from './shipkit.js';
 import { steelDeckTexture, teakDeckTexture, flightDeckTexture, hullNumberTexture } from './textures.js';
-import { sailor, crewGroup, windowRow, windowsAround, portholes, deckFittings, vents, raftRack, whips, roofRail, outlineRail, anchorGear, canisterLauncher, torpedoTubes, latticeMast, searchlight, ewArrays, hornet, hawkeye, seahawk, tug } from './detail.js';
+import { sailor, crewGroup, windowRow, windowsAround, portholes, deckFittings, vents, raftRack, whips, roofRail, outlineRail, anchorGear, canisterLauncher, torpedoTubes, latticeMast, searchlight, ewArrays, hornet, stealthJet, hawkeye, seahawk, tug } from './detail.js';
+// Each fleet's fighter: the Codex fleet's Super Hornets, the Claude fleet's clay-orange stealth fighters.
+export const FIGHTERS = {gpt: {model: hornet, color: null}, claude: {model: stealthJet, color: 0xd36b4f}};
 
 // The five ships of the classic game, at their classic sizes (5, 4, 3, 3 and 2 squares), each modeled after a
 // real class and built at its real dimensions: a Ford-class carrier, an Iowa-class battleship, a
@@ -453,11 +455,11 @@ function deckEdge(x, side) {
     return (x < points[0][0] ? points[0] : points.at(-1))[1];
 }
 
-// The strike jet the carrier launches: the same Super Hornet as the deck park.
-export function jetMesh(mats, scale = 1.1) {
-    const pieces = hornet(scale);
+// The strike jet the carrier launches: the same fighter as its deck park.
+export function jetMesh(mats, scale = 1.1, team = 'gpt') {
+    const pieces = (FIGHTERS[team] || FIGHTERS.gpt).model(scale);
     const group = new THREE.Group();
-    group.add(partMesh(mats.jet, pieces.gray), partMesh(mats.glass, pieces.glass), partMesh(mats.dark, pieces.dark));
+    group.add(partMesh(mats.fighter || mats.jet, pieces.gray), partMesh(mats.glass, pieces.glass), partMesh(mats.dark, pieces.dark));
     return group;
 }
 
@@ -506,13 +508,13 @@ function carrier(b) {
     b.add('lightRed', sphere(.0045, 8, 6), [ix + .06, top + .2, iz - .056]);
     b.add('lightGreen', sphere(.0045, 8, 6), [ix + .06, top + .2, iz + .056]);
     b.add('lightWhite', sphere(.0042, 8, 6), [mastTop.x, mastTop.y + .005, mastTop.z]);
-    // The deck park: Super Hornets along the bow and the starboard side, Hawkeyes, Seahawks, tractors.
-    const jets = hornet(.95);
+    // The deck park: the fleet's fighters along the bow and the starboard side, Hawkeyes, Seahawks, tractors.
+    const jets = (FIGHTERS[b.team] || FIGHTERS.gpt).model(.95);
     const park = [[2.15, .14, 2.4], [1.98, .22, 2.4], [1.81, .28, 2.4], [1.64, .33, 2.4], [1.47, .36, 2.4], [1.75, -.22, -.2],
         [-.78, .34, 2.25], [-1.0, .34, 2.25], [-1.22, .34, 2.25], [-1.44, .34, 2.25], [-1.66, .34, 2.25], [-1.88, .33, 2.25], [-2.1, .31, 2.25],
         [-.9, .19, 2.25], [-1.12, .19, 2.25], [-1.34, .19, 2.25], [-1.56, .19, 2.25], [-1.78, .18, 2.25], [1.2, .38, 2.5], [1.0, .4, 2.5]];
     for (const [x, z, yaw] of park) {
-        for (const piece of jets.gray) b.add('jet', piece.clone(), [x, top + .013, z], [0, yaw, 0]);
+        for (const piece of jets.gray) b.add('fighter', piece.clone(), [x, top + .013, z], [0, yaw, 0]);
         for (const piece of jets.glass) b.add('glass', piece.clone(), [x, top + .013, z], [0, yaw, 0]);
         for (const piece of jets.dark) b.add('dark', piece.clone(), [x, top + .013, z], [0, yaw, 0]);
     }
@@ -638,6 +640,7 @@ export class Ship {
             bootTop: {value: .02},
             paint: team.paint,
             superstructure: team.superstructure,
+            fighter: FIGHTERS[team.id]?.color,
         };
         const scale = classScale(type);
         this.scale = scale;
@@ -647,13 +650,15 @@ export class Ship {
         const deckTextures = {deck: null, vls: textures.vls, rail: textures.rail};
         const mats = shipMaterials(shared, this.uniforms, deckTextures);
         mats.flag = textures.flags[team.id];
+        mats.fighter = mats.fighter || mats.jet;
         builder.materials = mats;
+        builder.team = team.id;
         const design = DESIGNS[type](builder);
         mats.deck.map = design.deckTexture();
         mats.deck.needsUpdate = true;
         if (type === 'Carrier') {
             mats.flight = mats.deck.clone();
-            mats.flight.map = flightDeckTexture({bounds: {minX: -2.43, maxX: 2.43, minZ: -.59, maxZ: .47}, outline: CARRIER_DECK, code: CODES[team.id].Carrier, seed: team.id === 'gpt' ? 5 : 9});
+            mats.flight.map = flightDeckTexture({bounds: {minX: -2.43, maxX: 2.43, minZ: -.59, maxZ: .47}, outline: CARRIER_DECK, mascot: team.id === 'gpt' ? 'codex' : 'claude', seed: team.id === 'gpt' ? 5 : 9});
             mats.flight.onBeforeCompile = mats.deck.onBeforeCompile;
             mats.flight.customProgramCacheKey = mats.deck.customProgramCacheKey;
         }

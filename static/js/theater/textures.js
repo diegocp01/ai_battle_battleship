@@ -356,7 +356,7 @@ export function teakDeckTexture(seed = 3) {
 
 // The carrier's flight deck seen from above. Coordinates come from the deck outline in ship units so
 // the markings line up with the angled deck, elevators and island.
-export function flightDeckTexture({bounds, outline, code, seed = 5}) {
+export function flightDeckTexture({bounds, outline, mascot = null, seed = 5}) {
     const W = 2048, H = 512;
     const [element, context] = canvas(W, H);
     const random = mulberry32(seed);
@@ -439,17 +439,89 @@ export function flightDeckTexture({bounds, outline, code, seed = 5}) {
         context.strokeRect(toX(x), toY(z), w * sx, d / (bounds.maxZ - bounds.minZ) * H);
     }
     context.setLineDash([]);
-    // The hull number, painted big on the bow.
-    context.save();
-    context.translate(toX(1.95), toY(.0));
-    context.rotate(Math.PI / 2);
-    context.font = 'bold 132px "Helvetica Neue", Arial, sans-serif';
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-    context.fillStyle = 'rgba(240,240,236,.92)';
-    context.fillText(code, 0, 0);
-    context.restore();
+    // The fleet's mascot, painted on the bow in thin white deck lines (read from aft, as deck markings are).
+    if (mascot) {
+        const art = mascotLineArt(mascot, 290);
+        context.save();
+        context.translate(toX(1.86), toY(-.04));
+        context.rotate(Math.PI / 2);
+        context.globalAlpha = .92;
+        context.drawImage(art, -art.width / 2, -art.height / 2);
+        context.restore();
+    }
     return canvasTexture(element);
+}
+
+// A mascot as minimal white line art on a transparent square canvas of the given size: the outline of its
+// silhouette plus a few interior lines (eyes, the visor, the prompt on the chest).
+export function mascotLineArt(kind, size = 320) {
+    const line = Math.max(3, size / 64);
+    const white = 'rgba(244,244,238,1)';
+    // Outline of a filled shape: grow it by the line width, then cut the shape itself out, leaving a ring.
+    const outline = (drawShape) => {
+        const [mask, m] = canvas(size, size);
+        m.fillStyle = m.strokeStyle = white;
+        m.lineJoin = 'round';
+        m.lineWidth = line * 2;
+        drawShape(m, true);
+        m.globalCompositeOperation = 'destination-out';
+        drawShape(m, false);
+        return mask;
+    };
+    const [element, context] = canvas(size, size);
+    const u = size / 100;
+    context.strokeStyle = context.fillStyle = white;
+    context.lineWidth = line;
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    if (kind === 'claude') {
+        // A wide block of a body with stubby arms out to the sides, square eyes and four short legs.
+        context.drawImage(outline((m, grow) => {
+            const shape = () => {
+                m.beginPath();
+                m.rect(16 * u, 14 * u, 68 * u, 52 * u);
+                m.rect(5 * u, 30 * u, 12 * u, 14 * u);
+                m.rect(83 * u, 30 * u, 12 * u, 14 * u);
+                for (const x of [22, 32, 60, 70]) m.rect(x * u, 65 * u, 7 * u, 20 * u);
+            };
+            shape();
+            m.fill();
+            if (grow) m.stroke();
+        }), 0, 0);
+        for (const x of [29, 63]) context.fillRect(x * u, 26 * u, 8 * u, 8 * u);
+    } else {
+        // A cloud for a head, a rounded visor with two closed, smiling eyes, a small body with a prompt on it,
+        // little arms and feet.
+        const puffs = [[50, 30, 21], [31, 36, 16], [69, 36, 16], [25, 50, 13], [75, 50, 13], [38, 22, 13], [62, 22, 13], [50, 52, 18]];
+        const body = (m) => {
+            m.moveTo(36 * u, 62 * u);
+            m.roundRect(36 * u, 62 * u, 28 * u, 22 * u, 9 * u);
+            m.roundRect(27 * u, 64 * u, 9 * u, 13 * u, 4 * u);
+            m.roundRect(64 * u, 64 * u, 9 * u, 13 * u, 4 * u);
+            m.roundRect(39 * u, 82 * u, 9 * u, 9 * u, 3 * u);
+            m.roundRect(52 * u, 82 * u, 9 * u, 9 * u, 3 * u);
+        };
+        context.drawImage(outline((m, grow) => {
+            m.beginPath();
+            for (const [x, y, r] of puffs) { m.moveTo((x + r) * u, y * u); m.arc(x * u, y * u, r * u, 0, Math.PI * 2); }
+            body(m);
+            m.fill();
+            if (grow) m.stroke();
+        }), 0, 0);
+        context.beginPath();
+        context.roundRect(30 * u, 33 * u, 40 * u, 21 * u, 7 * u);
+        context.stroke();
+        for (const x of [40, 60]) {
+            context.beginPath();
+            context.arc(x * u, 41 * u, 4.5 * u, Math.PI * .15, Math.PI * .85);
+            context.stroke();
+        }
+        context.beginPath();
+        context.moveTo(44 * u, 70 * u); context.lineTo(48 * u, 73 * u); context.lineTo(44 * u, 76 * u);
+        context.moveTo(51 * u, 76 * u); context.lineTo(56 * u, 76 * u);
+        context.stroke();
+    }
+    return element;
 }
 
 export function hullNumberTexture(code) {
