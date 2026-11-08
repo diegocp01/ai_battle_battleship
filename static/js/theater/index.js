@@ -207,6 +207,7 @@ export class Theater {
         this.grid = new Battlefield(scene, this.ocean, {origins: ORIGINS, colors: this.colors, names: {gpt: TEAMS.gpt.name, claude: TEAMS.claude.name}});
         // The framed area: both boards, their banners above and their legends below.
         this.director = new Director(camera, renderer.domElement, {bounds: {center: new THREE.Vector3(0, 0, .55), width: 23.5, depth: 12.6}});
+        this.director.onNear = (near) => this.setNear(near);
         this.effects = new Effects(scene, {
             atlas: this.textures.atlas, ocean: this.ocean, env: this.env,
             onShake: (at, strength) => this.director.addShake(at, strength),
@@ -279,6 +280,17 @@ export class Theater {
             const forward = this.bowForward.set(1, 0, 0).applyQuaternion(ship.root.quaternion).setY(0).normalize();
             this.effects.bowSpray({x: bow.x, y: Math.max(sea, 0) + .005, z: bow.z}, forward, Math.min(1.4, .45 + climb * 40) * Math.sqrt(ship.beam / .35));
         }
+    }
+
+    // Bring the near clipping plane in (the cockpit shot, where the canopy frame and nose are a metre or two away)
+    // or put it back, and tell every pass that rebuilds distances from the depth buffer.
+    setNear(near = .1) {
+        if (this.camera.near === near) return;
+        this.camera.near = near;
+        this.camera.updateProjectionMatrix();
+        this.effects.uniforms.uNear.value = near;
+        for (const mesh of this.effects.fireballs?.pool || []) mesh.material.uniforms.uNear.value = near;
+        for (const blur of [this.ao.blurX, this.ao.blurY]) blur.uniforms.uNear.value = near;
     }
 
     slowMotion(factor, seconds) {

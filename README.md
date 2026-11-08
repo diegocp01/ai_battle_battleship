@@ -53,7 +53,7 @@ AI Battleship: two AI models deploy their fleets and trade fire on a full-screen
   - close beside the gun, launcher or catapult as it fires;
   - a camera above the barrier panning with the round as it climbs across (on longer flights);
   - a drone flying right beside the round as it comes down, slowing to slow motion just before it lands;
-  - for the carrier strike: a low shot on deck by the jet as it spools up, a deck camera at the bow whipping round as the jet charges past, a chase camera behind the jet over the barrier, a camera riding down the dive with the target growing ahead, then, in slow motion, a camera beside the target as the jet comes in, holding on the blast;
+  - for the carrier strike: a low shot on deck behind the yellow-shirted director, lighted wands circling overhead, while the jet spools up and the catapult officer drops to one knee and points down the track to launch; then a deck camera at the bow whipping round as the jet charges past, a chase camera behind the jet over the barrier, then the view from the pilot's seat down the dive: the nose and canopy ahead, a head-up display (pitch ladder, flight path marker, heading, airspeed, altitude, range to target) drawn from the jet's real attitude, and the horizon rolling with the jet, then, in slow motion, a camera beside the target as the jet comes in, holding on the blast;
   - a low angle over the water on the far side as it strikes.
   
   There is also a tactical wide view and a free camera. Scroll or pinch to zoom whichever camera is running, and drag at any time to take the camera yourself.
@@ -77,6 +77,14 @@ Pick one under *Connection* on the setup screen, then pick a model for each flee
 - **API keys**: calls the OpenAI and Anthropic APIs with the keys in `.env`.
 
 The model lists are in `MODELS` in `players.py`. Check the IDs against your provider's model list before connecting keys.
+
+### Open sound cues
+
+The battle already plays these sound cues; they stay silent until a recording is added. Each is listed and described in `OPEN_CUES` in `static/js/theater/sound-bank.js`. To give one a sound, add a file to `static/audio/` and an entry with the same key to `SOUND_BANK`; nothing else changes.
+
+- **Carrier launch:** `catapult` (the catapult stroke) and `deckWhistle` (the catapult officer's whistle).
+- **Cinematic-camera radio:** `radioStrikeTasking`, `radioPilotReady`, `radioAirborne`, `radioCommit` and `radioFinal`, the calls between the carrier and the pilot. These play only with the cinematic camera.
+- **Cockpit:** `cockpitWind` and `cockpitWarning`.
 
 ## Quickstart
 
