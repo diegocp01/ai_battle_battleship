@@ -630,7 +630,7 @@ export class Ship {
         this.uniforms = {
             inverse: {value: new THREE.Matrix4()},
             burn: {value: Array.from({length: 6}, () => new THREE.Vector4(0, 0, 0, 0))},
-            holes: {value: Array.from({length: 8}, () => new THREE.Vector4(0, 0, 0, 0))},
+            holes: {value: Array.from({length: 12}, () => new THREE.Vector4(0, 0, 0, 0))},
             teamColor: {value: new THREE.Color(team.color)},
             numberMap: {value: hullNumberTexture(CODES[team.id][type])},
             number: {value: new THREE.Vector4()},
@@ -801,6 +801,33 @@ export class Ship {
             }
         }
         return wrecked;
+    }
+
+    // A heavy hit amidships tears the side open: a gash from the deck edge down the side toward the waterline,
+    // about 8-14 m across for a warhead (more for the strike jet), ragged at the edge. Returns where it is, in
+    // the ship's frame, so the fire and the torn plates can be put in it.
+    tearSide(x, side, size = 1) {
+        if (this.type === 'Submarine') return null;
+        const holes = this.uniforms.holes.value;
+        this.holeCount = (this.holeCount || 0) + 1;
+        const slot = holes.find(v => v.w <= 0) || holes[this.holeCount % holes.length];
+        const deck = this.deckHeight(x);
+        const radius = (.04 + .045 * size) * Math.min(1.4, Math.sqrt(this.scale.x));
+        // Centred just below the deck edge, so it opens both the deck edge and the side beneath it.
+        const y = Math.max(radius * .55, deck - radius * .45);
+        const z = side * this.beam * .5;
+        slot.set(x, y, z, radius);
+        // The deck edge above it goes too (on a carrier, the flight deck overhangs the side).
+        const edge = holes.find(v => v.w <= 0) || holes[(this.holeCount + 5) % holes.length];
+        edge.set(x + (Math.random() - .5) * radius * .6, deck, side * (this.beam * .5 + radius * .55), radius * .8);
+        // The strike jet tears a long gash along the hull, not a round hole.
+        if (size >= 1.5) {
+            const more = holes.find(v => v.w <= 0) || holes[(this.holeCount + 9) % holes.length];
+            more.set(x + (Math.random() < .5 ? -1 : 1) * radius * 1.1, y - radius * .15, z, radius * .85);
+        }
+        const t = this.flooding.target;
+        t.list = THREE.MathUtils.clamp(t.list - side * .03, -.2, .2);
+        return {x, y, z, radius, deck};
     }
 
     // Scorch the hull around a hit and keep the burn glowing.

@@ -147,6 +147,8 @@ export class Theater {
         this.colors = {gpt: TEAMS.gpt.color, claude: TEAMS.claude.color};
         this.attract = false;
         this.nextDemo = 4;
+        this.bowPoint = new THREE.Vector3();
+        this.bowForward = new THREE.Vector3();
         this.busy = false;
         this.visible = true;
         this.quality = {ratio: Math.min(devicePixelRatio || 1, 1.5), max: Math.min(devicePixelRatio || 1, 2), slow: 0, fast: 0};
@@ -265,6 +267,20 @@ export class Theater {
         return new Promise(resolve => this.tweens.push({start: this.time, duration, fn, resolve}));
     }
 
+    // Spray at the stem when the sea rises against the bow faster than the bow rises with it (she is pitching
+    // into a crest), harder the faster the water climbs the stem.
+    bowWave(ship, dt, time) {
+        const bow = ship.body.localToWorld(this.bowPoint.set(ship.length * .48, 0, 0));
+        const sea = this.ocean.height(bow.x, bow.z, time);
+        const rise = ship.bowSea === undefined ? 0 : (sea - bow.y) - ship.bowSea;
+        ship.bowSea = sea - bow.y;
+        const climb = rise / Math.max(dt, 1e-3);
+        if (climb > .004 && Math.random() < dt * (3 + climb * 260)) {
+            const forward = this.bowForward.set(1, 0, 0).applyQuaternion(ship.root.quaternion).setY(0).normalize();
+            this.effects.bowSpray({x: bow.x, y: Math.max(sea, 0) + .005, z: bow.z}, forward, Math.min(1.4, .45 + climb * 40) * Math.sqrt(ship.beam / .35));
+        }
+    }
+
     slowMotion(factor, seconds) {
         if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
         this.slow = {factor, until: this.realTime + seconds};
@@ -329,6 +345,8 @@ export class Theater {
                 const sinking = ship.state === 'sinking' ? Math.min(1, (ship.sinking?.t || 0) / 2) : ship.state === 'sunk' ? .6 : 0;
                 if (sinking && Math.random() < dt * (ship.state === 'sunk' ? 1.5 : 20)) this.effects.bubbles(ship.root.position, ship.length * .35, 1);
                 if (ship.sail && Math.random() < dt * 30) this.wake(ship);
+                // The bow digs into the swell now and then and throws spray (surface ships, afloat).
+                if (ship.state === 'afloat' && ship.type !== 'Submarine') this.bowWave(ship, dt, time);
                 shipData.push({x: ship.root.position.x, z: ship.root.position.z, heading: ship.root.rotation.y, halfLength: ship.length / 2, halfBeam: ship.beam / 2, speed: ship.state === 'afloat' ? Math.min(1, ship.speed) : 0, foam: ship.type === 'Submarine' ? 1 : .4, sinking});
             }
         }
