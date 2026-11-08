@@ -265,6 +265,14 @@ class Reticle {
         this.mesh = new THREE.Mesh(geometry, this.material);
         this.mesh.renderOrder = 20;
         this.mesh.layers.set(NO_REFLECTION_LAYER);
+        // It hangs over the cell and draws over everything, which reads from above; seen from low down it
+        // would be bars across the sky, so it fades out as the camera comes down toward its level.
+        this.opacity = 0;
+        this.mesh.onBeforeRender = (renderer, scene, camera) => {
+            const p = this.group.position, c = camera.position;
+            const elevation = Math.atan2(c.y - p.y, Math.hypot(c.x - p.x, c.z - p.z));
+            this.material.opacity = this.opacity * THREE.MathUtils.smoothstep(elevation, .22, .45);
+        };
         this.group.add(this.mesh);
         this.group.visible = false;
         scene.add(this.group);
@@ -294,10 +302,10 @@ class Reticle {
             const ease = 1 - Math.pow(1 - k, 3);
             this.group.scale.setScalar(THREE.MathUtils.lerp(2.4, 1, ease) * (1 + Math.sin(time * 12) * .03 * ease));
             this.group.rotation.y = (1 - ease) * Math.PI / 2;
-            this.material.opacity = ease * .95;
+            this.opacity = ease * .95;
         } else {
             const k = Math.min(1, this.t / .3);
-            this.material.opacity = (1 - k) * .95;
+            this.opacity = (1 - k) * .95;
             this.group.scale.setScalar(1 + k * .4);
             if (k >= 1) {
                 this.state = 'idle';
