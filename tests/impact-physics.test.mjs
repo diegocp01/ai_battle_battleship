@@ -2,18 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {shipImpactProfile, integrateDrag, DEBRIS_GRAVITY} from '../static/js/theater/impact-physics.js';
 
-test('a light shell, heavy shell, missile and bomb produce distinct energy-scaled bursts', () => {
+test('a light shell, heavy shell, missile and strike jet produce distinct energy-scaled bursts', () => {
     const v = {x: 1, y: -4, z: 0};
     const light = shipImpactProfile('gun', {mass: 2.4, charge: .4, top: 1000}, v);
     const gun = shipImpactProfile('gun', undefined, v);
     const salvo = shipImpactProfile('salvo', undefined, v);
     const missile = shipImpactProfile('missile', undefined, v);
-    const bomb = shipImpactProfile('strike', undefined, v);
+    const jet = shipImpactProfile('strike', undefined, v);
     assert.ok(light.radius < gun.radius && gun.radius < salvo.radius);
-    assert.ok(salvo.radius < missile.radius && missile.radius < bomb.radius);
+    assert.ok(salvo.radius < missile.radius && missile.radius < jet.radius);
     assert.equal(salvo.delay, .055);
     assert.equal(missile.delay, 0);
-    assert.ok(light.flashLife < .1 && bomb.flashLife < .15);
+    assert.equal(jet.delay, 0);
+    assert.ok(light.flashLife < .1 && jet.flashLife < .15);
 });
 
 test('eight times the coupled energy doubles the radius; speed is capped', () => {

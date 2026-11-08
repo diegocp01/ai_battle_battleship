@@ -3,7 +3,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 (async()=>{
  const browser=await chromium.launch({headless:true,channel:'chrome',args:['--enable-webgl','--ignore-gpu-blocklist']});
  try {
- const page=await browser.newPage({viewport:{width:1200,height:800}});const errors=[];page.on('pageerror',e=>errors.push(String(e)));page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
+ const page=await browser.newPage({viewport:{width:1200,height:800}});const errors=[];page.on('pageerror',e=>{errors.push(String(e));console.error(e)});page.on('console',m=>{if(m.type()==='error'){errors.push(m.text());console.error(m.text())}});
  await page.goto((process.env.IMPACT_REVIEW_URL || 'http://127.0.0.1:5012/tests/impact-browser.html'));await page.waitForFunction(()=>window.ready,null,{timeout:60000});
  const results=await page.evaluate(async()=>{
   const t=impactReview.t, results=[];
@@ -38,6 +38,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_MODULE || 'playwright');
    const primary=calls.find(c=>c.kind===weapon);
    if(!primary || !(primary.velocity>0))throw new Error('Missing velocity '+weapon+JSON.stringify(calls));
    if(weapon==='gun'&&primary.round.mass!==2.4)throw new Error('Wrong light shell');
+   if(weapon==='strike' && (primary.round?.mass!==19000 || primary.round.fuel!==3000 || primary.round.fuze!=='impact'))throw new Error('Strike must retain jet impact physics');
    if(weapon==='torpedo'&&primary.round)throw new Error('Torpedo uses missile round');
    if(!t.fleets.claude.ships.get('Battleship').burningCells.has('E5'))throw new Error('Damage missing');
    results.push({weapon,done,calls:calls.length,velocity:primary.velocity,mass:primary.round?.mass});

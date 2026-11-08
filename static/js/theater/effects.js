@@ -513,7 +513,7 @@ export class Effects {
     //    flash, a small fireball and smoke.
     //  - The column falls back as heavy rain (each drop ringing the sea where it lands) and rolls out across the
     //    water as a base surge of mist.
-    waterImpact(at, {velocity, mass = 100, charge = 0, fuze = 'impact', top = Infinity, sound = true} = {}) {
+    waterImpact(at, {velocity, mass = 100, charge = 0, fuze = 'impact', top = Infinity, fuel = 0, sound = true} = {}) {
         const r = Math.random;
         const x = at.x, z = at.z;
         const v = velocity ? velocity.clone() : new THREE.Vector3(.6, -6, 0);
@@ -624,6 +624,22 @@ export class Effects {
                 if (s > .8) this.shock({x, y: .1, z}, s);
                 if (sound) this.onSound('explosion', at, s * .7);
             }
+        }
+        if (fuel > 0) {
+            // A crashing aircraft: the fuel left in its tanks flashes into a rolling fireball that climbs off
+            // the water, the rest burns on the surface where it lands, thrown downrange, and wreckage flies.
+            const f = Math.cbrt(fuel / 1000);
+            const ahead = {x: x + along.x * crater * .6 * slant, y: .01, z: z + along.z * crater * .6 * slant};
+            this.fireballs?.spawn({x: ahead.x, y: .09 * f, z: ahead.z}, .12 * f, {heat: .8, life: 2.4, rise: .8});
+            for (let i = 0; i < 26 * f; i++) {
+                const d = randomDir(.35), sp = (.3 + r() * .7) * f;
+                this.spawn({x: ahead.x, y: .05, z: ahead.z, vx: d.x * sp + along.x * slant * .6, vy: d.y * sp + .25, vz: d.z * sp + along.z * slant * .6, ramp: r() < .6 ? RAMP.FIRE : RAMP.SMOKE_FIRE, frame: r() < .6 ? FRAME.FLAME : FRAME.SMOKE, size: (.1 + r() * .12) * f, life: .9 + r() * .9, drag: 2.4, lift: 1, cool: 1.1, turb: .7, wind: .3, intensity: 1, delay: r() * .1});
+            }
+            for (let i = 0; i < 10 * f; i++) {
+                this.spawn({x: ahead.x + (r() - .5) * .15, y: .12, z: ahead.z + (r() - .5) * .15, vx: (r() - .5) * .12, vy: .25 + r() * .2, vz: (r() - .5) * .12, ramp: RAMP.SMOKE_DARK, frame: FRAME.SMOKE, size: (.22 + r() * .25) * f, life: 7 + r() * 5, drag: 1.1, lift: .45, cool: 3, wind: 1, turb: .4, delay: .2 + r() * .6});
+            }
+            this.spill(ahead, .9 * f);
+            this.debris?.burst({x: ahead.x, y: .03, z: ahead.z}, 10, 1.1, 3);
         }
         this.ocean.ripples?.impact(x, z, {radius: crater, strength: k, along, slant, delay: wait});
         this.onShake(at, .12 * k);
@@ -1099,14 +1115,15 @@ const FIRE_LIGHT = new THREE.Color(1, .55, .22);
 //   salvo: 16-inch armour-piercing shells, which burst inside the hull and vent up through the deck.
 //   missile / subMissile: a 200 kg warhead plus the unburned propellant in the motor: a rolling fuel fireball,
 //     a rain of burning fragments and thick black smoke.
-//   strike: a 900 kg bomb, the biggest fireball, debris column and shock front.
+//   strike: the strike jet flown into the ship with its 900 kg bomb and its remaining fuel aboard: the biggest
+//     fireball, a second one of burning jet fuel, a column of wreckage and the shock front.
 //   secondary: magazines and fuel tanks going up as a ship founders.
 const BLASTS = {
     gun: {fuel: .1, smoke: .7, debris: .6, burning: 1, push: .6},
     salvo: {fuel: .3, smoke: 1.2, debris: 1.5, burning: 3, push: 1.1, vent: true},
     missile: {fuel: 1, smoke: 1.35, debris: 1, burning: 4, push: 1},
     subMissile: {fuel: 1, smoke: 1.35, debris: 1, burning: 4, push: 1},
-    strike: {fuel: .5, smoke: 1.6, debris: 1.7, burning: 5, push: 1.4},
+    strike: {fuel: 1.1, smoke: 1.7, debris: 2, burning: 6, push: 1.4},
     secondary: {fuel: 1.2, smoke: 1.2, debris: .9, burning: 3, push: .9},
     torpedo: {fuel: .2, smoke: .9, debris: 1, burning: 1, push: 1.3},
 };

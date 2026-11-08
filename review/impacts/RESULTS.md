@@ -12,9 +12,9 @@ The long bright flash and spherical pressure bubble give way to shorter illumina
 
 - `node --test tests/*.test.mjs`: 11 passing tests, including energy/radius scaling, capped speed, momentum direction, gravity and matching debris trajectories at 30/60/144 Hz.
 - Headless Chrome / WebGL: all six weapon recipes have finite particle positions, expire fully after 20 simulated seconds and reset without delayed respawning. Deck bursts do not create water rings; the torpedo case does.
-- Complete gun, salvo, missile, submarine missile, carrier bomb and torpedo hit sequences finish, deliver nonzero arrival velocities and leave the target cell burning. The light gun retains its 2.4 kg round; torpedoes retain their own impact profile. The cruiser exercises its second missile impact too.
+- Complete gun, salvo, missile, submarine missile, carrier jet and torpedo hit sequences finish, deliver nonzero arrival velocities and leave the target cell burning. The carrier retains its 19,000 kg jet, 3,000 kg fuel and impact fuze. The light gun retains its 2.4 kg round; torpedoes retain their own impact profile. The cruiser exercises its second missile impact too.
 - Zero browser JavaScript or shader errors in the final checks. No LLM/API calls.
-- Inspected rendered frames at 0.08, 0.25, 0.7 and 1.8 seconds for missiles, plus shell and bomb bursts. Fireball rendering stays within the existing six-volume pool and debris within 220 instances. This is a correctness/visual check, not a hardware performance benchmark.
+- Inspected rendered frames at 0.08, 0.25, 0.7 and 1.8 seconds for missiles, plus shell and strike bursts. Fireball rendering stays within the existing six-volume pool and debris within 220 instances. This is a correctness/visual check, not a hardware performance benchmark.
 
 ## Reproduce
 

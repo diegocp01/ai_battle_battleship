@@ -6,7 +6,7 @@ const DEFAULTS = {
     salvo: {mass: 1225, charge: 18.6, top: 762, fuze: 'delay'},
     missile: {mass: 520, charge: 220, top: 300},
     subMissile: {mass: 520, charge: 220, top: 300},
-    strike: {mass: 925, charge: 430, top: 350, fuze: 'delay'},
+    strike: {mass: 19000, charge: 430, top: 400, fuze: 'impact', fuel: 3000},
     torpedo: {mass: 1500, charge: 290, top: 30},
     secondary: {mass: 0, charge: 90, top: 0},
 };

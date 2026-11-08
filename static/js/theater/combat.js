@@ -2,12 +2,13 @@ import * as THREE from 'three';
 import { RAMP, FRAME } from './effects.js';
 import { jetMesh } from './ships.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { WALL_CLEARANCE } from './wall.js';
+import { WALL, WALL_CLEARANCE } from './wall.js';
 
 // How a shot plays out. The attacking fleet picks a ship that is still afloat and uses its weapon: the
 // battleship trains a turret and fires a three-gun salvo, cruisers and destroyers fire their 5-inch gun or
 // ripple a missile out of a vertical launcher, the submarine sends a torpedo, and the carrier launches a jet
-// that drops a bomb. The round lands as a splash, a hit that sets the ship burning, or the blow that sinks it.
+// that dives into the target with its bomb aboard. The round lands as a splash, a hit that sets the ship
+// burning, or the blow that sinks it.
 const UP = new THREE.Vector3(0, 1, 0);
 const other = (team) => (team === 'gpt' ? 'claude' : 'gpt');
 // How big a fire each weapon starts, and how readily each ship burns: a carrier's aviation fuel, the
@@ -21,9 +22,10 @@ const ROUNDS = {
     gun: {mass: 31.8, charge: 3.6, fuze: 'impact', top: 800},        // 5-inch high-explosive shell
     gun57: {mass: 2.4, charge: .4, fuze: 'impact', top: 1000},       // 57 mm high-explosive round
     missile: {mass: 520, charge: 220, fuze: 'impact', top: 300},     // subsonic anti-ship missile and its warhead
-    bomb: {mass: 925, charge: 430, fuze: 'delay', top: 350},         // Mk 84 with a short delay
+    // The strike jet itself: a Super Hornet of about 19 t, its Mk 84 still aboard, and ~3 t of fuel left.
+    jet: {mass: 19000, charge: 430, fuze: 'impact', top: 400, fuel: 3000},
 };
-const roundFor = (weapon, shooterType) => weapon === 'salvo' ? 'salvo' : weapon === 'gun' ? (shooterType === 'Destroyer' ? 'gun57' : 'gun') : weapon === 'strike' ? 'bomb' : 'missile';
+const roundFor = (weapon, shooterType) => weapon === 'salvo' ? 'salvo' : weapon === 'gun' ? (shooterType === 'Destroyer' ? 'gun57' : 'gun') : weapon === 'strike' ? 'jet' : 'missile';
 
 export class Combat {
     constructor(theater) {
@@ -394,9 +396,9 @@ export class Combat {
     }
 
     // The carrier strike. A Super Hornet on the bow catapult spools up to full afterburner behind its raised
-    // blast deflector, steam leaking from the track; the catapult throws it off the bow; it climbs, turns over
-    // the barrier and dives on the target, releases a Mk 84 from its centreline, and pulls up hard, punching
-    // out flares as it goes.
+    // blast deflector, steam leaking from the track; the catapult throws it off the bow; it climbs and turns over
+    // the barrier. Having seen the enemy fleet, it does not come back: the pilot pushes over into a dive and flies
+    // the jet, Mk 84 still on its centreline, into the target cell, into the ship there or into the sea.
     async strike(carrier, impact, context) {
         const T = this.t;
         T.scene.updateMatrixWorld();
@@ -406,7 +408,7 @@ export class Combat {
         const scale = 1.15 * carrier.scale.x;
         const jet = jetMesh(carrier.materials, scale);
         jet.traverse(o => { if (o.isMesh) o.castShadow = true; });
-        // The bomb hangs on the centreline station until it is released.
+        // The bomb stays on the centreline station all the way in.
         const slung = new THREE.Mesh(this.bombGeometry, this.bombMaterial);
         slung.position.set(-.01 * scale, -.0175 * scale, 0);
         slung.castShadow = true;
@@ -447,16 +449,15 @@ export class Combat {
         // The deck camera stands on the port side of the bow catapult, clear of the deck park on the starboard side.
         const deckCamera = carrier.body.localToWorld(cat.start.clone().lerp(cat.end, .72).add(new THREE.Vector3(0, .026, -.17)));
         T.director.cueStrike('catapult', {start: deckStart.clone(), end: deckEnd.clone(), forward, camera: deckCamera});
-        const glowAt = () => jet.position.clone().addScaledVector(new THREE.Vector3(1, 0, 0).applyQuaternion(jet.quaternion), -.5 * scale);
-        T.effects.follow(glowAt, .55, 5, new THREE.Color(1, .62, .32));
         const toward = impact.clone().sub(deckEnd).setY(0).normalize();
         const side = new THREE.Vector3().crossVectors(toward, UP).multiplyScalar(Math.random() < .5 ? 1 : -1);
         const outward = Math.sign(impact.x) || 1;
         const over = new THREE.Vector3(0, WALL_CLEARANCE + 1.3, (deckEnd.z + impact.z) / 2).addScaledVector(side, .8);
         over.x = 0;
-        // The dive starts on the far side of the wall, however close to it the target is.
-        const release = impact.clone().addScaledVector(toward, -2.1).setY(1.7);
-        if (release.x * outward < 1.2) release.x = outward * 1.2;
+        // Where it pushes over into the dive: on the far side of the wall, however close to it the target is,
+        // about 40 degrees above the target. From there it is a straight dive.
+        const rollIn = impact.clone().addScaledVector(toward, -2.6).setY(impact.y + 2.2);
+        if (rollIn.x * outward < 1.2) rollIn.x = outward * 1.2;
         const climb = deckEnd.clone().lerp(over, .5).setY(WALL_CLEARANCE * .8).addScaledVector(side, 1.2);
         const curve = new THREE.CatmullRomCurve3([
             deckStart,
@@ -464,34 +465,67 @@ export class Combat {
             deckEnd.clone().addScaledVector(forward, 1.5).add(new THREE.Vector3(0, .6, 0)),
             climb,
             over,
-            release,
-            impact.clone().addScaledVector(toward, 1.4).setY(1.2),
-            impact.clone().addScaledVector(toward, 5).setY(4.4).addScaledVector(side, -1.5),
-            impact.clone().addScaledVector(toward, 16).setY(11),
+            rollIn,
+            rollIn.clone().lerp(impact, .5),
+            rollIn.clone().lerp(impact, .8),
+            impact.clone(),
         ], false, 'centripetal');
-        let releaseU = .5, bestDistance = Infinity;
-        for (let i = 0; i <= 200; i++) {
-            const d = curve.getPointAt(i / 200).distanceToSquared(release);
-            if (d < bestDistance) { bestDistance = d; releaseU = i / 200; }
+        const length = curve.getLength();
+        const nearest = (point) => {
+            let best = .5, bestDistance = Infinity;
+            for (let i = 0; i <= 300; i++) {
+                const d = curve.getPointAt(i / 300).distanceToSquared(point);
+                if (d < bestDistance) { bestDistance = d; best = i / 300; }
+            }
+            return best;
+        };
+        const rollU = nearest(rollIn), overS = nearest(over) * length;
+        // Speed along the path. The catapult takes it from rest to flying speed down the deck at constant
+        // acceleration; it accelerates on to cruise in afterburner; in the dive, gravity adds to the thrust and
+        // it gains a third again. (Speeds are quickened, like every flight in the battle.)
+        const deck = deckStart.distanceTo(deckEnd), stroke = .62, cruise = 6;
+        const exit = 2 * deck / stroke;
+        const rollS = rollU * length;
+        const speedAt = (s) => {
+            const v = exit + (cruise - exit) * THREE.MathUtils.smoothstep(s, deck, deck + 2.5);
+            return v * (1 + .35 * THREE.MathUtils.smoothstep(s, rollS, length));
+        };
+        const times = [0], dists = [0];
+        const steps = 600;
+        for (let i = 1; i <= steps; i++) {
+            const s = length * i / steps;
+            const t = s <= deck ? stroke * Math.sqrt(s / deck) : times[i - 1] + (length / steps) / speedAt(s - length / steps / 2);
+            times.push(t);
+            dists.push(s);
         }
-        const duration = 5.2;
-        // Catapult stroke: a fast acceleration down the deck, then cruising speed.
-        const ease = (k) => (k < .12 ? .045 * Math.pow(k / .12, 2) : .045 + (k - .12) / .88 * .955);
-        let dropped = false, flaresOut = false;
-        let bombDone;
-        const bombArrived = new Promise(resolve => { bombDone = resolve; });
-        const flight = {kind: 'jet', path: (k) => curve.getPointAt(Math.min(1, ease(k))), duration, mesh: jet, primary: true, orient: true};
+        const duration = times[steps];
+        const distanceAt = (time) => {
+            let lo = 0, hi = steps;
+            while (hi - lo > 1) {
+                const mid = (lo + hi) >> 1;
+                if (times[mid] <= time) lo = mid; else hi = mid;
+            }
+            const f = THREE.MathUtils.clamp((time - times[lo]) / Math.max(1e-6, times[hi] - times[lo]), 0, 1);
+            return dists[lo] + (dists[hi] - dists[lo]) * f;
+        };
+        const glowAt = () => jet.position.clone().addScaledVector(new THREE.Vector3(1, 0, 0).applyQuaternion(jet.quaternion), -.5 * scale);
+        T.effects.follow(glowAt, .55, duration, new THREE.Color(1, .62, .32));
+        let diving = false, terminal = false;
+        const flight = {kind: 'jet', path: (k) => curve.getPointAt(Math.min(1, distanceAt(k * duration) / length)), duration, mesh: jet, primary: true, orient: true};
         const promise = this.fly(flight);
         const record = this.projectiles[this.projectiles.length - 1];
         record.scale = scale;
+        // Its slow motion comes at the end of the dive, not at a fixed share of the flight.
+        record.slowed = true;
         record.onStep = (k, position, p) => {
-            const u = ease(k);
+            const s = distanceAt(k * duration), u = s / length;
             const ahead = curve.getPointAt(Math.min(1, u + .01));
             const behind = curve.getPointAt(Math.max(0, u - .01));
             const turn = ahead.clone().sub(position).normalize().cross(position.clone().sub(behind).normalize()).y;
-            p.bank = THREE.MathUtils.clamp(-turn * 60, -1.1, 1.1);
+            // Wings level once it is committed to the dive.
+            p.bank = s >= rollS ? p.bank * .9 : THREE.MathUtils.clamp(-turn * 60, -1.1, 1.1);
             // Down the deck: the catapult's steam blows out of the track behind the shuttle.
-            if (u < .05) {
+            if (s < deck) {
                 for (let i = 0; i < 3; i++) {
                     const at = deckStart.clone().lerp(position, Math.random());
                     T.effects.spawn({x: at.x, y: at.y - .01, z: at.z, vx: (Math.random() - .5) * .2, vy: .1 + Math.random() * .2, vz: (Math.random() - .5) * .2, ramp: RAMP.STEAM, frame: FRAME.SMOKE, size: .05 + Math.random() * .06, life: 2 + Math.random() * 1.5, drag: 1.4, lift: .25, wind: .8, alpha: .8});
@@ -500,38 +534,49 @@ export class Combat {
                 p.lowered = true;
                 T.tween(1.2, (q) => { panel.rotation.z = THREE.MathUtils.lerp(.5, Math.PI / 2, q); }).then(() => setTimeout(() => jbd.removeFromParent(), 0));
             }
-            if (!dropped && u >= releaseU) {
-                dropped = true;
-                p.primary = false;
-                // The bomb leaves the centreline station with the jet's own speed and falls away.
-                T.scene.updateMatrixWorld();
-                const from = slung.getWorldPosition(new THREE.Vector3());
-                slung.visible = false;
-                const bomb = new THREE.Mesh(this.bombGeometry, this.bombMaterial);
-                bomb.castShadow = true;
-                const fall = .85;
-                T.audio.play('whistle', impact, fall);
-                T.director.cueStrike('release');
-                T.slowMotion(.35, .9);
-                this.fly({kind: 'bomb', path: this.ballistic(from, impact, .12), duration: fall, mesh: bomb, primary: true}).then(bombDone);
+            // Over the barrier, the camera rides down with it.
+            if (!diving && s >= overS) {
+                diving = true;
+                T.director.cueStrike('dive', {target: impact.clone()});
             }
-            // Pulling off the target it punches out flares, which arc away burning white.
-            if (dropped && !flaresOut && u > releaseU + .05) {
-                flaresOut = true;
-                const back = position.clone().sub(behind).normalize().negate();
-                const across = new THREE.Vector3().crossVectors(back, UP).normalize();
-                for (let i = 0; i < 8; i++) {
-                    const s = i % 2 ? 1 : -1;
-                    const to = position.clone().addScaledVector(back, .7 + Math.random() * .5).addScaledVector(across, s * (.4 + Math.random() * .7)).add(new THREE.Vector3(0, -1.2 - Math.random() * .8, 0));
-                    setTimeout(() => this.fly({kind: 'flare', path: this.ballistic(position.clone(), to, .25), duration: 1.5 + Math.random() * .4}), i * 45);
-                }
+            // The last 130 metres: a camera by the target watches it come in, in slow motion.
+            if (!terminal && s >= length - 1.75) {
+                terminal = true;
+                const view = this.terminalVantage(impact, toward, outward, Boolean(context.victim));
+                T.director.cueStrike('terminal', {target: impact.clone(), camera: view, look: impact.clone().lerp(position, .22)});
+                T.slowMotion(.3, .9);
             }
         };
-        promise.then(() => {
-            T.effects.heatSources.splice(T.effects.heatSources.indexOf(heat), 1);
-            jet.traverse(o => { if (o !== slung) o.geometry?.dispose(); });
-        });
-        await bombArrived;
+        const arrival = await promise;
+        T.effects.heatSources.splice(T.effects.heatSources.indexOf(heat), 1);
+        jet.traverse(o => { if (o !== slung) o.geometry?.dispose(); });
+        return arrival;
+    }
+
+    // Where to stand to watch the jet go in: beside its dive, low, a little over 100 m from the target. Of a few
+    // places either side, the one furthest from the board's labels, every ship and the barrier.
+    terminalVantage(impact, toward, outward, hit) {
+        const T = this.t;
+        const side = new THREE.Vector3().crossVectors(toward, UP).normalize();
+        const avoid = [];
+        for (const label of T.grid.labels) avoid.push({at: label.getWorldPosition(new THREE.Vector3()), radius: .75});
+        for (const [team, fleet] of Object.entries(T.fleets)) {
+            if (!fleet) continue;
+            for (const ship of fleet.ships.values()) for (const cell of ship.cells) avoid.push({at: T.grid.cellCenter(team, cell), radius: .62});
+        }
+        let best = null, bestScore = -Infinity;
+        for (const sign of [1, -1]) {
+            for (const [across, beyond] of [[1.15, .35], [1.5, .1], [1.2, -.35], [1.7, .5]]) {
+                const at = impact.clone().setY(0).addScaledVector(side, sign * across).addScaledVector(toward, beyond);
+                let clear = Infinity;
+                for (const item of avoid) clear = Math.min(clear, Math.hypot(at.x - item.at.x, at.z - item.at.z) - item.radius);
+                clear = Math.min(clear, at.x * outward - (WALL.baseHalf + .7));
+                const score = Math.min(clear, .6) - across * .05;
+                if (score > bestScore) { bestScore = score; best = at; }
+            }
+        }
+        best.y = Math.max(.16, impact.y + (hit ? .26 : .16));
+        return best;
     }
 
     // ---------------------------------------------------------------------------------------------------

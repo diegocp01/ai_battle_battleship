@@ -263,8 +263,9 @@ export class Director {
 
     // The carrier strike has its own shots. spool: on deck by the jet's nose, low, the afterburners lighting
     // the blast deflector behind it. catapult: a camera low on the bow edge looking back down the track, whipping
-    // round as the jet roars past. Then a chase camera behind the jet as it climbs and turns over the barrier,
-    // and at release the drone beside the falling bomb.
+    // round as the jet roars past. Then a chase camera behind the jet as it climbs and turns over the barrier;
+    // dive: riding just behind and above it as it pushes over, the target growing in the middle of the frame;
+    // terminal: a camera by the target, the jet screaming down at it in slow motion.
     cueStrike(stage, data = {}) {
         const shot = this.shot;
         if (!shot || this.mode !== 'cinematic') return;
@@ -286,16 +287,39 @@ export class Director {
             shot.bow = position.clone();
             this.cut(position, data.start.clone().add(new THREE.Vector3(0, .012, 0)));
             this.goal.smooth = 6;
-        } else if (stage === 'release') {
-            shot.phase = 'drone';
-            shot.droneStarted = false;
-            shot.last = null;
+        } else if (stage === 'dive') {
+            shot.phase = 'dive';
+            shot.diveTarget = data.target.clone();
+        } else if (stage === 'terminal') {
+            // Beside the dive, low over the water (above the deck for a ship), far enough back for the blast to
+            // fit the frame. It stays put and turns gently from the incoming jet down to the target.
+            shot.phase = 'terminal';
+            shot.terminalAt = data.camera.clone();
+            this.cut(data.camera, data.look);
+            this.goal.position.copy(data.camera);
         }
     }
 
     // Per frame during the strike's flight. Returns true when it has set the camera itself.
     followStrike(projectile) {
         const shot = this.shot;
+        if (shot.phase === 'dive') {
+            // Rigidly behind and above the jet, looking down its dive at the target.
+            const dir = shot.dir || shot.forward;
+            const side = new THREE.Vector3().crossVectors(dir, UP);
+            if (side.lengthSq() < 1e-6) side.copy(shot.side);
+            side.normalize().multiplyScalar(shot.sideSign);
+            const position = projectile.clone().addScaledVector(dir, -.42).addScaledVector(side, .1).add(new THREE.Vector3(0, .1, 0));
+            const look = projectile.clone().addScaledVector(dir, .6).lerp(shot.diveTarget, .35);
+            this.cut(position, look);
+            return true;
+        }
+        if (shot.phase === 'terminal') {
+            this.goal.position.copy(shot.terminalAt);
+            this.goal.look.copy(shot.diveTarget).lerp(projectile, .25);
+            this.goal.lookSmooth = .3;
+            return true;
+        }
         if (shot.phase === 'catapult') {
             // A fixed camera on the bow, whipping round as the jet goes past.
             this.goal.look.copy(projectile).add(new THREE.Vector3(0, .01, 0));
@@ -355,6 +379,16 @@ export class Director {
         const shot = this.shot;
         this.shake = Math.max(this.shake, kind === 'miss' ? .05 : kind === 'sunk' ? .3 : .2);
         if (!shot || this.mode !== 'cinematic') return;
+        if (shot.phase === 'terminal') {
+            // The jet has gone in right in front of the camera by the target: hold the shot and ease back from it.
+            shot.phase = 'impact';
+            const away = shot.terminalAt.clone().sub(point).setY(0).normalize();
+            this.goal.position.copy(shot.terminalAt).addScaledVector(away, .9).add(new THREE.Vector3(0, .35, 0));
+            this.goal.look.copy(point).add(new THREE.Vector3(0, .3, 0));
+            this.goal.smooth = 1.8;
+            this.goal.lookSmooth = .5;
+            return;
+        }
         // Cut to a low angle over the water on the far side, the strike filling the frame, then ease back.
         shot.phase = 'impact';
         const wide = kind === 'sunk' ? 2.8 : kind === 'miss' ? 1.7 : 2.1;
