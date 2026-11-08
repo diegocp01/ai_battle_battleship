@@ -34,6 +34,12 @@ const RAMP_DEFS = {
     FW_WHITE: [[0, 1, 1, 1, 1, 1, 1, 10, 0], [.5, .95, .95, 1, .8, 1, .8, 6, 0], [1, .8, .85, 1, 0, 1, .5, 2, 0]],
     FW_RED: [[0, 1, .85, .8, 1, 1, 1, 9, 0], [.4, 1, .25, .2, .9, 1, .9, 7, 0], [1, .8, .1, .08, 0, 1, .5, 2, 0]],
     FW_GREEN: [[0, .85, 1, .85, 1, 1, 1, 9, 0], [.4, .3, 1, .45, .9, 1, .9, 7, 0], [1, .1, .7, .25, 0, 1, .5, 2, 0]],
+    // A fire's plume: oily smoke, near-black where it leaves the flames, turning a heavy brown-grey as it billows
+    // up and spreads (sunlit on top, dark underneath, from the shading), and slowly thinning downwind.
+    PLUME: [[0, .09, .075, .065, 0, 0, .55, 0, 1], [.05, .1, .085, .075, .82, 0, .7, 0, 1], [.3, .2, .18, .16, .74, 0, 1.25, 0, 1], [.7, .33, .32, .31, .45, 0, 1.8, 0, 1], [1, .42, .42, .42, 0, 0, 2.2, 0, 1]],
+    // A tongue of flame: bright yellow-orange at the root, narrowing and reddening toward the tip, where it
+    // breaks off and vanishes rather than swelling into a puff.
+    TONGUE: [[0, 1, .62, .2, 1, 1, .7, 3, 0], [.2, 1, .45, .1, 1, 1, .8, 2.4, 0], [.5, .92, .28, .05, .8, 1, .65, 1.4, 0], [.78, .55, .12, .03, .35, .85, .45, .45, 0], [1, .22, .06, .02, 0, .6, .3, 0, 0]],
     // Ship fires: orange flames with darker red tips rather than a white-hot core.
     BLAZE: [[0, 1, .78, .42, 1, 1, .5, 2.7, 0], [.15, 1, .52, .16, 1, 1, .8, 2.2, 0], [.4, .95, .32, .07, .85, .85, 1, 1.3, 0], [.65, .5, .14, .04, .55, .45, 1.15, .45, 0], [1, .1, .07, .05, 0, 0, 1.3, 0, 0]],
 };
@@ -149,10 +155,11 @@ void main() {
     float alpha = tex.a * vColor.a * vAlpha;
     if (vParams.w > .5) alpha *= smoothstep(-.01, .1, vWorld.y);
     // Soft particles: fade out as the billboard nears the surface behind it, instead of cutting a hard line
-    // where smoke meets the sea, a deck or the wall.
+    // where smoke meets the sea, a deck or the wall. Flames add light, so a sharp edge there doesn't show:
+    // they fade over a much shorter distance and stay bright right down on the deck where they burn.
     if (uSoft > .5) {
         float sceneZ = -viewZFromDepth(texture2D(uDepth, gl_FragCoord.xy / uScreen).x, uNear, uFar);
-        alpha *= clamp((sceneZ + vViewZ) / (.02 + vSize * .45), 0., 1.);
+        alpha *= clamp((sceneZ + vViewZ) / (.01 + vSize * mix(.45, .1, additive)), 0., 1.);
     }
     // Near the lens a billboard would fill the frame as a flat card: fade it out as the camera reaches it.
     alpha *= clamp((-vViewZ - .04) / (vSize * 1.4 + .06), 0., 1.);
@@ -316,13 +323,17 @@ export class Effects {
     // Recipes
     // ---------------------------------------------------------------------------------------------------
 
-    // Something new catches (a fuel line, a locker of paint, ready ammunition): the fire roars up for a moment.
+    // Something new catches (a fuel line, a locker of paint, ready ammunition): flames leap up for a moment and a
+    // gout of black smoke follows them.
     flareUp(fire, at) {
         const r = Math.random;
         fire.flare = 1;
-        for (let i = 0; i < 16; i++) {
-            const dir = randomDir(.55), speed = .4 + r() * .7;
-            this.spawn({x: at.x, y: at.y + .02, z: at.z, vx: dir.x * speed * .5, vy: dir.y * speed, vz: dir.z * speed * .5, ramp: RAMP.FIRE, frame: FRAME.FLAME, size: (.07 + r() * .08) * fire.scale, life: .5 + r() * .4, drag: 2.2, lift: 2.6, cool: .4, wind: .4, turb: 1, intensity: 1});
+        for (let i = 0; i < 18; i++) {
+            const dir = randomDir(.7), speed = .5 + r() * .8;
+            this.spawn({x: at.x + (r() - .5) * .06, y: at.y + .02, z: at.z + (r() - .5) * .06, vx: dir.x * speed * .35, vy: dir.y * speed, vz: dir.z * speed * .35, ramp: RAMP.TONGUE, frame: FRAME.FLAME, size: (.14 + r() * .12) * fire.scale, life: .45 + r() * .35, drag: 2, lift: 1.6, cool: .3, wind: .4, turb: .9, stretch: .3, intensity: .8});
+        }
+        for (let i = 0; i < 8; i++) {
+            this.spawn({x: at.x + (r() - .5) * .08, y: at.y + .12 + r() * .08, z: at.z + (r() - .5) * .08, vx: (r() - .5) * .1, vy: .35 + r() * .2, vz: (r() - .5) * .1, ramp: RAMP.SMOKE_DARK, frame: FRAME.SMOKE, size: (.12 + r() * .08) * fire.scale, life: 8 + r() * 5, drag: .8, lift: .35, cool: 4, wind: 1, turb: .35, delay: .15 + r() * .2});
         }
         for (let i = 0; i < 12; i++) {
             const dir = randomDir(.3), speed = 1 + r() * 1.8;
@@ -372,8 +383,18 @@ export class Effects {
         this.pending.push({at: this.time + seconds, fn});
     }
 
-    // A compact pressure flash, directional ejecta, then slower fuel combustion and soot.
-    // Delayed fuzes vent through the deck; the incoming round supplies energy and momentum.
+    // A hit on a ship, in the order it happens:
+    //  - contact: sparks off the plating (before the burst, even for a delayed fuze);
+    //  - the detonation: a white-hot flash lasting hundredths of a second;
+    //  - the fireball: not one ball but an irregular cluster of hot lobes, thrown up and downrange by the
+    //    round's momentum, that draw out taller as they rise; fuel-rich hits (missile propellant, a jet's
+    //    tanks) roll up a second, slower fireball of burning fuel;
+    //  - flame jets: hot gas bursting out of the hull through openings, stopped by the air within metres;
+    //  - smoke: soot made in the fireball, which takes over as the fireball cools (first lit orange from below,
+    //    then black), rising in a column that widens and leans with the wind;
+    //  - wreckage: plates of hull and superstructure, some burning, and glowing fragments.
+    // The incoming round supplies energy (size) and momentum (downrange bias); delayed fuzes burst inside the
+    // hull and vent up through the deck.
     explosion(at, scale = 1, {water = false, debris = true, sound = true, kind = 'missile', ship = null, waterline = false, velocity, round} = {}) {
         const blast = BLASTS[kind] || BLASTS.missile;
         const hull = HULLS[ship] || HULLS.none;
@@ -385,7 +406,6 @@ export class Effects {
         const fuel = blast.fuel * hull.fuel;
         const carry = physics.drift;
         const wet = water || waterline || hull.steam;
-        // Contact sparks precede the internal burst, even for a delayed fuze.
         for (let i = 0; i < Math.round(20 + 30 * size * hull.sparks); i++) {
             const dir = randomDir(.12), speed = (.8 + r() * 2.8) * Math.sqrt(size);
             this.spawn({x, y: y + .015, z, vx: dir.x * speed + carry.x, vy: dir.y * speed + .35, vz: dir.z * speed + carry.z, ramp: RAMP.SPARK, frame: FRAME.SPARK, size: .008 + r() * .012, life: .18 + r() * .55, drag: 1.1, lift: -DEBRIS_GRAVITY, stretch: .025, collide: true, intensity: .8});
@@ -393,36 +413,43 @@ export class Effects {
         const burst = () => {
             this.flash(at, 5 * size, physics.flashLife, new THREE.Color(1, .78, .5));
             this.spawn({x, y: y + .025, z, ramp: RAMP.FLASH, frame: FRAME.GLOW, size: radius * 2.6, life: physics.flashLife, drag: 0, intensity: .7});
-            // Unequal, moving lobes break the spherical silhouette. Only fuel-rich hits keep
-            // glowing after the pressure flash; smoke occupies the same cooling volume.
-            const lobes = size > .6 ? 3 : 1;
+            this.spawn({x, y: y + .03, z, ramp: RAMP.FLASH, frame: FRAME.FLARE, size: radius * 3.4, life: physics.flashLife * .7, drag: 0, rot: r() * 3, intensity: .45});
+            // The fireball: unequal lobes around the burst point. An armour-piercing burst vents upward.
+            const lobes = kind === 'gun' ? 1 + (size > .3) : size > .9 ? 4 : size > .5 ? 3 : 2;
             for (let i = 0; i < lobes; i++) {
-                const dir = randomDir(.3);
-                const reach = radius * (i ? .65 : .12);
-                const offset = {x: x + dir.x * reach, y: y + radius * .25 + dir.y * reach, z: z + dir.z * reach};
-                this.fireballs?.spawn(offset, radius * (i ? .65 : .95), {
-                    heat: i ? .75 : 1, life: .9 + fuel * .6, rise: .45 + size * .3,
-                    velocity: {x: carry.x * .3 + dir.x * radius * 2, y: dir.y * radius * 2, z: carry.z * .3 + dir.z * radius * 2},
-                    cooling: .12 + fuel * .2,
+                const dir = randomDir(blast.vent ? .7 : .35);
+                const reach = radius * (i ? .45 + r() * .4 : .1);
+                const centre = {x: x + dir.x * reach + carry.x * .03 * i, y: y + radius * .3 + dir.y * reach, z: z + dir.z * reach + carry.z * .03 * i};
+                this.fireballs?.spawn(centre, radius * (i ? .45 + r() * .3 : .9), {
+                    heat: i ? .7 + r() * .25 : 1, life: .8 + fuel * .7 + r() * .3, rise: .5 + size * .35,
+                    velocity: {x: carry.x * .3 + dir.x * radius * 2.2, y: dir.y * radius * 2.2, z: carry.z * .3 + dir.z * radius * 2.2},
+                    cooling: .14 + fuel * .22, stretch: .3 + r() * .35,
                 });
             }
-            // Fast, narrow jets entrain air and stop; AP bursts favour an upward vent.
-            for (let i = 0; i < Math.round(16 + 22 * size); i++) {
-                const dir = randomDir(blast.vent ? .75 : .2);
-                const speed = radius * (5 + r() * 7);
-                this.spawn({x, y: y + .02, z, vx: dir.x * speed + carry.x * .4, vy: dir.y * speed, vz: dir.z * speed + carry.z * .4, ramp: RAMP.FIRE, frame: FRAME.FLAME, size: radius * (.22 + r() * .4), life: .16 + r() * (.2 + fuel * .18), drag: 5, lift: .8, cool: .4, turb: .65, intensity: .8});
-            }
             if (fuel > .6) this.later(.09, () => {
-                this.fireballs?.spawn({x: x + carry.x * .06, y: y + radius * .6, z: z + carry.z * .06}, radius * 1.15, {heat: .8, life: 1.8 + fuel * .4, rise: .7, velocity: {x: carry.x * .18, y: .12, z: carry.z * .18}, cooling: .55});
+                this.fireballs?.spawn({x: x + carry.x * .06, y: y + radius * .6, z: z + carry.z * .06}, radius * 1.15, {heat: .8, life: 1.8 + fuel * .5, rise: .75, velocity: {x: carry.x * .18, y: .12, z: carry.z * .18}, cooling: .55, stretch: .6});
             });
-            // Soot starts in the expanding gas, then rises and shears with the wind.
-            for (let i = 0; i < Math.round(12 + 22 * size * blast.smoke); i++) {
-                const dir = randomDir(.35), speed = radius * (1 + r() * 3);
-                this.spawn({x: x + dir.x * radius * .3, y: y + .03 + dir.y * radius * .4, z: z + dir.z * radius * .3, vx: dir.x * speed + carry.x * .18, vy: dir.y * speed + .15, vz: dir.z * speed + carry.z * .18, ramp: i % 5 === 0 ? RAMP.SMOKE_FIRE : RAMP.SMOKE_DARK, frame: FRAME.SMOKE, size: radius * (.7 + r() * .9), life: 4 + r() * 5, drag: 1.8, lift: .35 + size * .15, cool: 2.5, wind: 1, turb: .55, delay: .06 + r() * .25});
+            // Flame jets: streaks of burning gas thrown out of the hull, stopped by the air within metres.
+            for (let i = 0; i < Math.round(18 + 26 * size); i++) {
+                const dir = randomDir(blast.vent ? .75 : .2);
+                const speed = radius * (6 + r() * 8);
+                this.spawn({x, y: y + .02, z, vx: dir.x * speed + carry.x * .4, vy: dir.y * speed, vz: dir.z * speed + carry.z * .4, ramp: r() < .6 ? RAMP.FIRE : RAMP.BLAZE, frame: FRAME.FLAME, size: radius * (.15 + r() * .3), life: .14 + r() * .2 + fuel * .15, drag: 6, lift: .9, cool: .4, turb: .65, stretch: .02, intensity: .85});
             }
-            // Few substantial fragments, rather than a uniform shower of orange confetti.
-            if (debris) this.debris.burst(at, Math.round(5 + 9 * size * blast.debris), size, Math.round(blast.burning * size), carry);
-            for (let i = 0; i < Math.round(8 * size); i++) {
+            // Smoke. First the soot inside the fireball, lit orange from below as it boils up out of the flame...
+            for (let i = 0; i < Math.round(6 + 10 * size); i++) {
+                const dir = randomDir(.4), speed = radius * (1 + r() * 2);
+                this.spawn({x: x + dir.x * radius * .3, y: y + radius * .3, z: z + dir.z * radius * .3, vx: dir.x * speed + carry.x * .15, vy: dir.y * speed + .3, vz: dir.z * speed + carry.z * .15, ramp: RAMP.SMOKE_FIRE, frame: FRAME.SMOKE, size: radius * (.7 + r() * .7), life: 2.2 + r() * 1.5, drag: 1.8, lift: .5 + size * .2, cool: 2, wind: .8, turb: .6, delay: .04 + r() * .12});
+            }
+            // ...then the black body of it, appearing as the fireball cools and filling the space it held,
+            // rising and widening into a column that the wind leans over.
+            for (let i = 0; i < Math.round(14 + 30 * size * blast.smoke); i++) {
+                const dir = randomDir(.35), speed = radius * (.8 + r() * 2.6);
+                const h = r();
+                this.spawn({x: x + dir.x * radius * .5, y: y + .03 + radius * (.2 + h * .9), z: z + dir.z * radius * .5, vx: dir.x * speed + carry.x * .15, vy: dir.y * speed * .6 + .2 + h * .25, vz: dir.z * speed + carry.z * .15, ramp: RAMP.SMOKE_DARK, frame: FRAME.SMOKE, size: radius * (.8 + r() * 1.1), life: 6 + r() * 7, drag: 1.5, lift: .4 + size * .2, cool: 3, wind: 1, turb: .5, delay: .12 + r() * .45});
+            }
+            // Wreckage: a few plates of hull you can pick out, among many small fragments.
+            if (debris) this.debris.burst(at, Math.round(6 + 12 * size * blast.debris), size, Math.round(blast.burning * size), carry);
+            for (let i = 0; i < Math.round(10 * size); i++) {
                 const dir = randomDir(.2), speed = (.5 + r() * 1.5) * Math.sqrt(size);
                 this.spawn({x, y: y + .03, z, vx: dir.x * speed + carry.x, vy: dir.y * speed + .3, vz: dir.z * speed + carry.z, ramp: RAMP.EMBER, frame: FRAME.EMBER, size: .008 + r() * .008, life: .7 + r(), drag: .8, lift: -DEBRIS_GRAVITY, collide: true});
             }
@@ -493,7 +520,7 @@ export class Effects {
             const anchor = new THREE.Object3D();
             anchor.position.set(at.x + Math.cos(a) * d, .012, at.z + Math.sin(a) * d);
             this.scene.add(anchor);
-            this.fires.push({anchor, scale: .4 + r() * .3, flame: 0, smoke: 0, alive: true, seed: r() * 10, age: 0, life: 3.5 + r() * 4, owned: true, delay: .2 + r() * .5});
+            this.fires.push(this.makeFire(anchor, .4 + r() * .3, {life: 3.5 + r() * 4, owned: true, delay: .2 + r() * .5}));
         }
     }
 
@@ -839,10 +866,100 @@ export class Effects {
     // Persistent fires and lights
     // ---------------------------------------------------------------------------------------------------
 
+    // A fire where a round hit. A hit sets more than one thing burning, so the main fire has one or two smaller
+    // ones beside it along the deck (attached to it, so they ride and sink with the ship).
     addFire(anchor, scale = 1) {
-        const fire = {anchor, scale, flame: 0, smoke: 0, alive: true, seed: Math.random() * 10, age: 0};
+        const r = Math.random;
+        const fire = this.makeFire(anchor, scale);
+        for (let i = 0; i < (scale > .9 ? 2 : 1); i++) {
+            const node = new THREE.Object3D();
+            node.position.set((i ? -1 : 1) * (.06 + r() * .09), 0, (r() - .5) * .05);
+            anchor.add(node);
+            fire.sources.push({node, weight: .4 + r() * .3, flame: 0, tongue: 0, smoke: 0, phase: r() * 10});
+        }
         this.fires.push(fire);
         return fire;
+    }
+
+    // Torn steel left at a hit: plates ripped up and bent outward around the hole, charred black, a few still
+    // glowing at the torn edge. Attached to the hit, so it rides, lists and sinks with the ship.
+    scar(anchor, scale = 1) {
+        const r = Math.random;
+        if (!this.scarMaterials) {
+            this.scarMaterials = [
+                new THREE.MeshStandardMaterial({color: 0x161514, roughness: .9, metalness: .3}),
+                new THREE.MeshStandardMaterial({color: 0x3a3632, roughness: .75, metalness: .5}),
+                new THREE.MeshStandardMaterial({color: 0x1a1512, roughness: .85, metalness: .3, emissive: new THREE.Color(1, .3, .06), emissiveIntensity: .9}),
+            ];
+            // A jagged sheet: a thin slab whose top edge is torn into points.
+            const shape = new THREE.Shape();
+            shape.moveTo(-.5, 0);
+            for (let i = 0; i <= 6; i++) shape.lineTo(-.5 + i / 6, .55 + (i % 2 ? .45 : 0) * (.6 + r() * .4));
+            shape.lineTo(.5, 0);
+            this.scarGeometry = new THREE.ExtrudeGeometry(shape, {depth: .04, bevelEnabled: false}).translate(0, 0, -.02);
+        }
+        const group = new THREE.Group();
+        const count = Math.round(5 + 5 * Math.min(1.6, scale));
+        for (let i = 0; i < count; i++) {
+            const a = (i / count) * Math.PI * 2 + r() * .5;
+            const ring = (.012 + r() * .02) * scale;
+            const plate = new THREE.Mesh(this.scarGeometry, this.scarMaterials[i % 7 === 0 ? 2 : i % 3 === 0 ? 1 : 0]);
+            const size = (.018 + r() * .03) * Math.sqrt(scale);
+            plate.scale.set(size, size * (.6 + r() * .8), size);
+            plate.position.set(Math.cos(a) * ring, -.004, Math.sin(a) * ring);
+            // Peeled up and outward from the hole, at odd angles.
+            plate.rotation.set((r() - .5) * .6, -a + Math.PI / 2, 0);
+            plate.rotateX(-(.35 + r() * .9));
+            plate.castShadow = true;
+            group.add(plate);
+        }
+        anchor.add(group);
+        return group;
+    }
+
+    makeFire(anchor, scale, extra = {}) {
+        return {anchor, scale, alive: true, seed: Math.random() * 10, age: 0, sources: [{node: anchor, weight: 1, flame: 0, tongue: 0, smoke: 0, phase: Math.random() * 10}], ...extra};
+    }
+
+    // One burning spot of a fire, s its strength (about 1 for a missile hit). Sized after the fire-plume laws:
+    //  - the burning area is a few metres to ten across;
+    //  - Heskestad's flame height L = 0.235 Q^0.4 - 1.02 D comes to 10-20 m for a fuel fire that size;
+    //  - the flames puff at about 1.5 / sqrt(D) Hz: a low bed of flame, with tongues that lick up to the
+    //    flame height (more of them on each puff), lean with the wind and break off at the tips;
+    //  - smoke leaves the flame tips black and dense (burning fuel and paint make thick soot), lit orange from
+    //    below at first, rising on its buoyancy, widening as it draws in air and sheared off downwind.
+    burn(source, at, s, burning, dt) {
+        const r = Math.random;
+        const base = .06 * Math.pow(s, .6);
+        const across = Math.max(1, base * 2 * 75);
+        const puff = .5 + .5 * Math.sin(burning * 1.5 / Math.sqrt(across) * Math.PI * 2 + source.phase);
+        const height = .19 * Math.pow(s, .7);
+        // The burning bed glows: a low, flickering light where the fuel is, brightest at the roots of the flames.
+        // (A flame texture fills about half its square, so sizes here are about twice the visible flame.)
+        if (r() < dt * 8) this.spawn({x: at.x + (r() - .5) * base * .6, y: at.y + .015, z: at.z + (r() - .5) * base * .6, ramp: RAMP.TONGUE, frame: FRAME.GLOW, size: base * (2 + r()), life: .22 + r() * .15, drag: 0, intensity: .12 + puff * .08});
+        source.flame += dt * 34 * s;
+        while (source.flame >= 1) {
+            source.flame -= 1;
+            const a = r() * Math.PI * 2, d = Math.sqrt(r()) * base;
+            this.spawn({x: at.x + Math.cos(a) * d, y: at.y + .004, z: at.z + Math.sin(a) * d, vx: (r() - .5) * .03, vy: .04 + r() * .05, vz: (r() - .5) * .03, ramp: r() < .7 ? RAMP.TONGUE : RAMP.BLAZE, frame: FRAME.FLAME, size: (.09 + r() * .08) * Math.pow(s, .6), life: .22 + r() * .16, drag: 2, lift: .8, cool: .3, wind: .25, turb: .5, rot: (r() - .5) * .3, spin: (r() - .5) * .3, intensity: .7 + r() * .3});
+        }
+        source.tongue += dt * 26 * s * (.5 + puff);
+        while (source.tongue >= 1) {
+            source.tongue -= 1;
+            const a = r() * Math.PI * 2, d = Math.sqrt(r()) * base * .8;
+            this.spawn({x: at.x + Math.cos(a) * d, y: at.y + .01, z: at.z + Math.sin(a) * d, vx: (r() - .5) * .05, vy: height * (1.8 + r() * .9) * (.8 + puff * .4), vz: (r() - .5) * .05, ramp: r() < .8 ? RAMP.TONGUE : RAMP.BLAZE, frame: FRAME.FLAME, size: (.09 + r() * .07) * Math.pow(s, .65), life: .3 + r() * .18, drag: 2.4, lift: 1.2, cool: .25, wind: .5, turb: .7, stretch: .45, intensity: .75 + r() * .3});
+        }
+        source.smoke += dt * 22 * Math.pow(s, .9);
+        while (source.smoke >= 1) {
+            source.smoke -= 1;
+            // It forms in the upper flames, so fire and plume are one column.
+            const top = at.y + height * (.25 + r() * .4);
+            const x = at.x + (r() - .5) * base * 1.4, z = at.z + (r() - .5) * base * 1.4;
+            // Fed in surges with each puff of the flames, so the plume billows and rolls over itself.
+            this.spawn({x, y: top, z, vx: (r() - .5) * .05, vy: .2 + r() * .12 + puff * .08, vz: (r() - .5) * .05, ramp: RAMP.PLUME, frame: FRAME.SMOKE, size: (.2 + r() * .14) * Math.pow(s, .8), life: 15 + r() * 9, drag: .6, lift: .32, cool: 5, wind: 1, turb: .4, spin: (r() - .5) * .4});
+            // Now and then a wisp of the plume's underside, right over the flames, still glowing.
+            if (r() < .08) this.spawn({x, y: top - height * .3, z, vx: (r() - .5) * .03, vy: .2 + r() * .1, vz: (r() - .5) * .03, ramp: RAMP.SMOKE_FIRE, frame: FRAME.SMOKE, size: (.06 + r() * .04) * Math.pow(s, .8), life: 1 + r() * .5, drag: .6, lift: .3, cool: 2, wind: .8, turb: .4, alpha: .7});
+        }
     }
 
     flash(at, intensity, duration, color) {
@@ -906,7 +1023,10 @@ export class Effects {
     update(dt, camera) {
         this.time += dt;
         const r = Math.random;
-        const world = this.tmp;
+        const world = this.tmp, spot = this.spot || (this.spot = new THREE.Vector3());
+        // When the particle pool runs full (a long battle, many ships burning), every fire emits less.
+        const load = this.count / CAPACITY;
+        const budget = load > .5 ? Math.max(.25, 1 - (load - .5) * 1.8) : 1;
         // Fires: flames lick upward, black smoke climbs and drifts downwind; under water they hiss out.
         const due = this.pending.filter(item => item.at <= this.time);
         if (due.length) {
@@ -928,8 +1048,7 @@ export class Effects {
                 this.steam(world, 1.2);
                 continue;
             }
-            // A ship fire after the empirical fire-plume laws. It takes hold over a few seconds and flares up now
-            // and then; spilled fuel dies down at the end.
+            // It takes hold over a few seconds and flares up now and then; spilled fuel dies down at the end.
             const burning = fire.age - (fire.delay || 0);
             const growth = 1 - Math.exp(-burning / 2.2);
             fire.flare = Math.max(0, (fire.flare || 0) - dt * .7);
@@ -937,36 +1056,20 @@ export class Effects {
             const fade = fire.life ? Math.min(1, (fire.life - fire.age) / 1.5) : 1;
             const s = fire.scale * (.3 + .7 * growth) * fade * (1 + fire.flare * .7);
             fire.level = s / fire.scale;
-            // Pool fires puff: the flame column pulses at about 1.5 / sqrt(D) Hz for a fire D metres across.
-            const across = Math.max(1, .06 * s * 75);
-            const puff = .5 + .5 * Math.sin(burning * 1.5 / Math.sqrt(across) * Math.PI * 2 + fire.seed * 7);
-            fire.flame += dt * 24 * s * (.65 + .7 * puff);
-            fire.smoke += dt * 16 * s;
-            const base = .035 * s;
-            while (fire.flame >= 1) {
-                fire.flame -= 1;
-                // Flames rise on their own buoyancy, about twice gravity in the hot core, which dies away as they
-                // mix and cool; the wind leans them over. Their life sets the flame height, which grows as
-                // Heskestad's L ~ Q^0.4 does with the fire's size.
-                const a = r() * Math.PI * 2, d = Math.sqrt(r()) * base;
-                this.spawn({x: world.x + Math.cos(a) * d, y: world.y + .005, z: world.z + Math.sin(a) * d, vx: (r() - .5) * .04, vy: .08 + puff * .1 + r() * .05, vz: (r() - .5) * .04, ramp: r() < .7 ? RAMP.BLAZE : RAMP.FIRE, frame: FRAME.FLAME, size: (.06 + r() * .07) * Math.pow(s, .7), life: (.45 + r() * .35) * Math.pow(s, .35) * (.85 + puff * .3), drag: 1.2, lift: 1, cool: .35, wind: .45, turb: .4, intensity: .55 + r() * .35});
+            for (const source of fire.sources) {
+                source.node.getWorldPosition(spot);
+                // The part of the fire that has gone under is out.
+                if (spot.y < -.015) continue;
+                this.burn(source, spot, s * source.weight, burning, dt * budget);
             }
-            while (fire.smoke >= 1) {
-                fire.smoke -= 1;
-                // Smoke leaves the flame tips in a buoyant plume: quick and hot at first, slowing and widening
-                // as it draws in air, then drifting off on the wind for many seconds. Some of it is still lit
-                // orange from below.
-                const top = world.y + .14 * Math.pow(s, .8) + r() * .05;
-                this.spawn({x: world.x + (r() - .5) * base, y: top, z: world.z + (r() - .5) * base, vx: (r() - .5) * .03, vy: .12 + r() * .08, vz: (r() - .5) * .03, ramp: r() < .14 ? RAMP.SMOKE_FIRE : RAMP.SMOKE_DARK, frame: FRAME.SMOKE, size: (.12 + r() * .08) * Math.pow(s, .8), life: 10 + r() * 6, drag: .7, lift: .22, cool: 4, wind: 1, turb: .25});
-            }
-            if (r() < dt * 4 * s) this.spawn({x: world.x + (r() - .5) * base, y: world.y + .03, z: world.z + (r() - .5) * base, vx: (r() - .5) * .15, vy: .2 + r() * .25, vz: (r() - .5) * .15, ramp: RAMP.EMBER, frame: FRAME.EMBER, size: .011, life: 2.2 + r() * 1.6, drag: .6, lift: .3, cool: 1, wind: .9, turb: .8});
+            if (r() < dt * 4 * s) this.spawn({x: world.x + (r() - .5) * .06, y: world.y + .03, z: world.z + (r() - .5) * .06, vx: (r() - .5) * .15, vy: .2 + r() * .25, vz: (r() - .5) * .15, ramp: RAMP.EMBER, frame: FRAME.EMBER, size: .011, life: 2.2 + r() * 1.6, drag: .6, lift: .3, cool: 1, wind: .9, turb: .8});
             // A fire that has burned a while catches the deck beside it (once).
             if (!fire.life && !fire.spread && burning > 9 + fire.seed && fire.anchor.parent && this.fires.length < 40) {
                 fire.spread = true;
                 const next = new THREE.Object3D();
                 next.position.copy(fire.anchor.position).add(new THREE.Vector3((r() - .5) * .16, 0, (r() - .5) * .05));
                 fire.anchor.parent.add(next);
-                this.fires.push({anchor: next, scale: fire.scale * .65, flame: 0, smoke: 0, alive: true, seed: r() * 10, age: 0, spread: true});
+                this.fires.push(this.makeFire(next, fire.scale * .65, {spread: true}));
             }
         }
         this.fires = this.fires.filter(f => f.alive);
@@ -1146,15 +1249,23 @@ function randomDir(upBias = 0) {
     return v.normalize();
 }
 
-// Chunks of hull and superstructure thrown by an explosion; each trails smoke and splashes down.
+// Wreckage thrown by an explosion: torn plates of hull and superstructure, tumbling. Some keep their grey
+// paint, some are scorched black; each trails smoke (the burning ones, flame) and splashes down.
+const PAINT = [new THREE.Color(0x6e7378), new THREE.Color(0x585d62), new THREE.Color(0x2b2c2e), new THREE.Color(0x1b1b1c)];
+
 class Debris {
     constructor(scene, effects) {
         this.effects = effects;
+        // A bent, irregular plate rather than a rock: thin across one axis, jagged at the edges.
         const geometry = new THREE.IcosahedronGeometry(1, 0);
         const positions = geometry.attributes.position;
-        for (let i = 0; i < positions.count; i++) positions.setXYZ(i, positions.getX(i) * (.6 + Math.random() * .8), positions.getY(i) * (.3 + Math.random() * .5), positions.getZ(i) * (.6 + Math.random() * .9));
+        for (let i = 0; i < positions.count; i++) {
+            const x = positions.getX(i), z = positions.getZ(i);
+            positions.setXYZ(i, x * (.7 + Math.random() * .6), positions.getY(i) * (.1 + Math.random() * .1) + x * z * .25, z * (.5 + Math.random() * .7));
+        }
         geometry.computeVertexNormals();
-        this.mesh = new THREE.InstancedMesh(geometry, new THREE.MeshStandardMaterial({color: 0x1d1e20, roughness: .75, metalness: .4}), 220);
+        this.mesh = new THREE.InstancedMesh(geometry, new THREE.MeshStandardMaterial({color: 0xffffff, roughness: .7, metalness: .45}), 220);
+        this.mesh.setColorAt(0, PAINT[0]);
         this.mesh.castShadow = true;
         this.mesh.frustumCulled = false;
         this.mesh.count = 0;
@@ -1169,13 +1280,15 @@ class Debris {
     burst(at, count, scale, burning = 0, momentum = {x: 0, y: 0, z: 0}) {
         for (let i = 0; i < count && this.items.length < 220; i++) {
             const dir = randomDir(.35);
-            const fragmentSize = (.008 + Math.pow(Math.random(), 2) * .035) * Math.sqrt(scale);
+            // Mostly small fragments, a few larger plates.
+            const fragmentSize = (.006 + Math.pow(Math.random(), 2.4) * .034) * Math.sqrt(scale);
             // Larger pieces have less speed and less drag per unit mass.
             const speed = (.7 + Math.random() * 1.3) * Math.sqrt(scale) * Math.sqrt(.018 / fragmentSize);
             this.items.push({
                 p: new THREE.Vector3(at.x, at.y + .05, at.z), v: dir.multiplyScalar(speed).add(new THREE.Vector3(momentum.x, .6, momentum.z)),
                 r: new THREE.Vector3(Math.random() * 6, Math.random() * 6, Math.random() * 6), w: new THREE.Vector3((Math.random() - .5) * 14, (Math.random() - .5) * 14, (Math.random() - .5) * 14),
                 s: fragmentSize, drag: .22 * .018 / fragmentSize, age: 0, smokeClock: 0, smoke: Math.random() < .6, fire: i < burning,
+                color: PAINT[i < burning ? 2 + (i % 2) : Math.floor(Math.random() * PAINT.length)],
             });
         }
     }
@@ -1224,9 +1337,11 @@ class Debris {
             this.quaternion.setFromEuler(this.euler.set(item.r.x, item.r.y, item.r.z));
             this.matrix.compose(item.p, this.quaternion, new THREE.Vector3(item.s, item.s, item.s));
             this.mesh.setMatrixAt(i, this.matrix);
+            this.mesh.setColorAt(i, item.color);
         });
         this.mesh.count = this.items.length;
         this.mesh.instanceMatrix.needsUpdate = true;
+        if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
     }
 }
 

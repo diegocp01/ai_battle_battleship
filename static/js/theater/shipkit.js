@@ -396,7 +396,10 @@ function weathering(material, shared, ship, {hull = false, rust = .5, ember = tr
                     float d = length(vShipPos.xz - b.xy) + (shipGrime.r - .5) * b.z * .9;
                     shipBurn = max(shipBurn, (1. - smoothstep(b.z * .3, b.z, d)) * b.w);
                 }
-                diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.016, .014, .013), shipBurn * .93);
+                // Scorched: soot-black at the heart, browning paint around it, with soot streaked down the sides.
+                float streak = vertical * smoothstep(.3, .8, shipNoise(vec3(vShipPos.x * 60., vShipPos.y * 6., vShipPos.z * 60.)));
+                diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.21, .15, .1), smoothstep(0., .5, shipBurn) * .45);
+                diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.016, .014, .013), clamp(shipBurn * (.9 + streak * .3), 0., .97));
                 // Shell and warhead holes: a jagged opening (through the hull, the dark inside shows), ringed by
                 // steel bent outward and stripped of paint.
                 shipBent = 0.;
@@ -416,9 +419,12 @@ function weathering(material, shared, ship, {hull = false, rust = .5, ember = tr
             .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
                 roughnessFactor = clamp(roughnessFactor + (shipGrime.r - .5) * .22 + shipBurn * .35, .05, 1.);`)
             .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-                ${ember ? `float emberField = shipNoise(vShipPos * 34.) * .62 + shipNoise(vShipPos * 91.) * .38;
-                float emberPulse = .6 + .4 * sin(uTime * 3.1 + shipNoise(vShipPos * 9.) * 18.);
-                totalEmissiveRadiance += vec3(1., .3, .05) * pow(shipBurn, 3.) * smoothstep(.56, .8, emberField) * emberPulse * 2.;` : ''}`);
+                ${ember ? `// Charred steel still glowing in cracks and along torn edges: fine veins, not blotches, and only in
+                // the heart of the burn.
+                float emberField = shipNoise(vShipPos * 140.) * .55 + shipNoise(vShipPos * 330.) * .45;
+                float vein = 1. - abs(shipNoise(vShipPos * 75.) - .5) * 2.;
+                float emberPulse = .55 + .45 * sin(uTime * 3.1 + shipNoise(vShipPos * 9.) * 18.);
+                totalEmissiveRadiance += vec3(1., .32, .06) * pow(shipBurn, 4.) * smoothstep(.62, .82, emberField) * smoothstep(.75, .95, vein) * emberPulse * 3.;` : ''}`);
     };
     material.customProgramCacheKey = () => (hull ? 'ship-hull' : 'ship-paint') + (ember ? '-e' : '') + (plates ? '-p' : '');
     return material;

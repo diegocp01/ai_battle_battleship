@@ -193,6 +193,7 @@ export class Combat {
             }
             victim.burningCells.add(shot.target);
             T.effects.addFire(anchor, (FIRE_BY_WEAPON[kind] ?? 1) * (FIRE_BY_SHIP[victim.type] ?? 1));
+            T.effects.scar(anchor, size * (context.waterline ? .7 : 1));
             T.grid.markHit(defender, shot.target);
             T.director.impact(impact, shot.result);
             T.post.flash(.12);
