@@ -169,8 +169,10 @@ def board_view(info):
     return '\n'.join(lines)
 
 
-def placement_prompt(player_name):
-    return f"""You are {player_name}, an admiral in a game of Battleship.
+# Both sides get exactly the same words: no name, brand or color tells a model which side or which model family it
+# is, so neither seat is favoured and neither model is cued to play "as itself".
+def placement_prompt():
+    return f"""You are an admiral in a game of Battleship.
 
 GRID: 10×10. Columns A–J (left to right), rows 1–10 (top to bottom).
 
@@ -189,7 +191,7 @@ RULES:
 Return every ship's start cell and direction, and one short sentence about your plan."""
 
 
-def fire_prompt(player_name, shooter, info, turn):
+def fire_prompt(shooter, info, turn):
     # The player's memory of this match: every shot it has fired, what came of it and what it was thinking at the
     # time, and the notes it left itself last turn. It starts empty with every new match.
     def entry(shot):
@@ -212,7 +214,7 @@ def fire_prompt(player_name, shooter, info, turn):
     fired = ', '.join(sorted(info['fired'], key=lambda c: (to_index(c)[1], to_index(c)[0]))) or 'none'
     afloat = ', '.join(f'{name} ({SHIPS[name]})' for name in info['remaining'])
     sunk = ', '.join(info['sunk']) or 'none yet'
-    return f"""You are {player_name}, an admiral in a game of Battleship. Turn {turn}.
+    return f"""You are an admiral in a game of Battleship. Turn {turn}.
 
 YOUR RADAR OF THE ENEMY GRID:
 {board_view(info)}

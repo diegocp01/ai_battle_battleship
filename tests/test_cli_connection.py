@@ -186,6 +186,9 @@ class CLIConnectionTest(unittest.TestCase):
         prompts = [c['prompt'] for c in self.calls() if c['tool'] == 'claude' and 'Turn ' in c['prompt']]
         last = prompts[-1]
         self.assertIn('YOUR MEMORY OF THIS MATCH', last)
+        # Both seats get the same unnamed prompt: nothing names a side or a model family.
+        for word in ('GPT', 'Claude', 'Player A', 'Player B', 'Blue', 'Orange'):
+            self.assertNotIn(word, last)
         # The memory begins at placement: its own fleet as placed, and the plan it gave then.
         self.assertIn('Carrier (5): A1–E1 (H)', last)
         self.assertIn('Your plan when you placed it: Stacked along the west edge.', last)
