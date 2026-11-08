@@ -73,6 +73,8 @@ Shots, hits, accuracy and thinking time are not shown during the match. They are
 
 ## Connections
 
+**Same words for both sides.** Both models get exactly the same prompts. Nothing in them names a side, a seat or a model family, so neither seat is favoured and neither model is cued to play "as itself".
+
 **Memory: per match, fresh each match.** Every move is a fresh request, so a model's memory is what the app writes into its prompt each turn. That memory is kept for the length of a match and starts empty with every new match. It begins at placement:
 - **Placement:** before the battle, each model gets one placement prompt (the side that will fire first deploys first). It answers with every ship's start cell and direction (H runs right, V runs down) and a one-sentence plan. The server checks the fleet is on the grid with no overlaps; an illegal fleet stops the match until the move is retried. Neither model ever sees the other's fleet.
 

@@ -247,13 +247,12 @@ def place_ships():
         seat = state['players'][player]
         started = time.time()
         try:
-            label = 'Player A (GPT)' if player == 'gpt' else 'Player B (Claude)'
             if state['mode'] == 'test':
                 placement, reasoning = simulated_placement(SIMULATED_STRATEGY, rng_for(state, player, 'placement'))
             elif state['mode'] == 'cli':
-                placement, reasoning = cli_placement(player, placement_prompt(label), seat['model'], seat['effort'])
+                placement, reasoning = cli_placement(player, placement_prompt(), seat['model'], seat['effort'])
             else:
-                placement, reasoning = api_placement(player, placement_prompt(label), seat['model'], seat['effort'], seat['speed'])
+                placement, reasoning = api_placement(player, placement_prompt(), seat['model'], seat['effort'], seat['speed'])
         except ProviderError as error:
             return jsonify({'error': f"{seat['name']}: {error}"}), 502
         except Exception as error:  # SDK and network errors
@@ -295,14 +294,13 @@ def next_move():
         info = knowledge(shooter, defender)
         started = time.time()
         try:
-            label = 'Player A (GPT)' if player == 'gpt' else 'Player B (Claude)'
             notes = ''
             if state['mode'] == 'test':
                 target, reasoning = simulated_shot(player, SIMULATED_STRATEGY, info, rng_for(state, player, turn))
             elif state['mode'] == 'cli':
-                target, reasoning, notes = cli_shot(player, fire_prompt(label, shooter, info, turn), shooter['model'], shooter['effort'])
+                target, reasoning, notes = cli_shot(player, fire_prompt(shooter, info, turn), shooter['model'], shooter['effort'])
             else:
-                target, reasoning, notes = api_shot(player, fire_prompt(label, shooter, info, turn), shooter['model'], shooter['effort'], shooter['speed'])
+                target, reasoning, notes = api_shot(player, fire_prompt(shooter, info, turn), shooter['model'], shooter['effort'], shooter['speed'])
         except ProviderError as error:
             return jsonify({'error': f"{shooter['name']}: {error}"}), 502
         except Exception as error:
