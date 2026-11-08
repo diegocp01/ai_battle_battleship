@@ -22,14 +22,19 @@ const speeds = [1, 2, 4, 8];
 const escapeHtml = (text) => String(text).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const team = (key) => `<span class="team-${key}">${escapeHtml(names[key])}</span>`;
 
+// The bar at the bottom shows only notices (the match interrupted, paused, won). The running commentary (who is
+// thinking, where each shot went) stays out of sight, read out to screen readers from the same live region; the
+// scoreboard, the typed reasoning and the battle itself show it.
 function setStatus(title, detail = '') {
     $('game-status').textContent = title;
     $('status-detail').textContent = detail;
+    document.querySelector('.commentary').classList.remove('quiet');
 }
 
-function setStatusHtml(html, detail = '') {
+function setStatusHtml(html, detail = '', {notice = false} = {}) {
     $('game-status').innerHTML = html;
     $('status-detail').textContent = detail;
+    document.querySelector('.commentary').classList.toggle('quiet', !notice);
 }
 
 function savePreferences() {
@@ -456,13 +461,16 @@ async function finishGame(current, animate) {
     setMode('complete');
     const winner = current.winner;
     const stats = current.players[winner].stats;
-    setStatusHtml(`${team(winner)} wins the battle`, `${stats.shots} shots, ${stats.hits} hits, ${Math.round(stats.hits / Math.max(1, stats.shots) * 100)}% accuracy.`);
+    setStatusHtml(`${team(winner)} wins the battle`, `${stats.shots} shots, ${stats.hits} hits, ${Math.round(stats.hits / Math.max(1, stats.shots) * 100)}% accuracy.`, {notice: true});
     if (animate) {
         banner('victory', 'Enemy fleet destroyed', `${names[winner]} wins`);
         celebrate(current);
         await theater?.celebrate(winner);
     }
 }
+
+// The match the opening flyover has been flown for.
+let openedFor = null;
 
 async function runGameLoop() {
     if (loopActive) return;
@@ -487,6 +495,14 @@ async function runGameLoop() {
                 banner('deploy', `${names[data.player]}`, 'Fleet deploying');
                 if (theater) await theater.deploy(data.player, data.game_state.players[data.player].fleet);
                 continue;
+            }
+            // Both fleets deployed: before the first shot, each fleet's fighters fly down its own board to open the
+            // battle (once per match).
+            if (theater && current.turn === 0 && openedFor !== current.match_id) {
+                openedFor = current.match_id;
+                setStatusHtml('The fleets open the battle with a flyover');
+                await theater.openingFlyover();
+                if (mode !== 'running') break;
             }
             const shooter = current.current_player;
             showThinking(shooter, 'Thinking');

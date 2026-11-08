@@ -800,9 +800,11 @@ export class Effects {
             }
         };
         if (kind === 'shell') {
-            // A glowing tracer streak, and a thin wake of hot gas and propellant smoke behind the shell.
-            this.spawn({x: at.x, y: at.y, z: at.z, vx: velocity.x * .02, vy: velocity.y * .02, vz: velocity.z * .02, ramp: RAMP.TRACER, frame: FRAME.SPARK, size: .11, life: .12, drag: 0, stretch: .03, intensity: 1.6});
-            this.spawn({x: at.x, y: at.y, z: at.z, vx: velocity.x, vy: velocity.y, vz: velocity.z, ramp: RAMP.TRACER, frame: FRAME.GLOW, size: .13, life: Math.min(.034, dt * 1.05), drag: 0, intensity: 1.2});
+            // The shell itself is a mesh. Behind it: the small hot glow of the tracer in its base, a thin streak
+            // of light along its path, and a faint wake of hot gas and propellant smoke.
+            const base = at.clone().addScaledVector(back, .03);
+            this.spawn({x: base.x, y: base.y, z: base.z, vx: velocity.x * .02, vy: velocity.y * .02, vz: velocity.z * .02, ramp: RAMP.TRACER, frame: FRAME.SPARK, size: .028, life: .09, drag: 0, stretch: .02, intensity: 1.3});
+            this.spawn({x: base.x, y: base.y, z: base.z, vx: velocity.x, vy: velocity.y, vz: velocity.z, ramp: RAMP.TRACER, frame: FRAME.GLOW, size: .022, life: Math.min(.034, dt * 1.05), drag: 0, intensity: 1.1});
             along(.045, (x, y, z) => this.spawn({x, y, z, vx: (r() - .5) * .05, vy: (r() - .5) * .05, vz: (r() - .5) * .05, ramp: RAMP.GUNSMOKE, frame: FRAME.WISP, size: .03 + r() * .025, life: .6 + r() * .5, drag: 2, wind: .5, alpha: .4}));
         } else if (kind === 'missile') {
             const tail = at.clone().addScaledVector(back, .07);
