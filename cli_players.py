@@ -6,7 +6,8 @@ reasoning efforts it supports, and the Claude Code CLI's own help lists the effo
 
 Every call is one self-contained turn with no tools: Claude runs with its tools switched off, no MCP servers and no
 saved session; Codex runs in a read-only sandbox in an empty temporary folder with network and web search off.
-Both must answer in a JSON schema, so the move comes back as data instead of prose to parse.
+Both must answer in a JSON schema, so the move comes back as data instead of prose to parse. The model's reasoning
+comes back too (Claude's summarized thinking, Codex's reasoning items), for the one-line summary in the legend.
 """
 from __future__ import annotations
 
@@ -179,29 +180,49 @@ def _run(args, payload, cwd, env=None):
         raise CLIError(f'Could not start {Path(args[0]).name}: {error}')
 
 
+# Asks for summarized thinking, so the CLI returns the model's thinking as text (it leaves it out by default).
+THINKING_FLAG = ['--thinking-display', 'summarized']
+
+
+def _claude_messages(stdout):
+    """The messages of a stream-json run (one JSON object per line), skipping anything that is not JSON."""
+    messages = []
+    for line in (stdout or '').splitlines():
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        messages.extend(item if isinstance(item, list) else [item])
+    return [item for item in messages if isinstance(item, dict)]
+
+
 def _claude(prompt, system, schema, model, effort):
     claude = _tool('CLAUDE_CLI', 'claude')
     if not claude:
         raise CLIError('Claude Code CLI not found. Install it and sign in with `claude`.')
-    args = [claude, '-p', '--model', model, '--output-format', 'json', '--json-schema', json.dumps(schema),
+    args = [claude, '-p', '--model', model, '--output-format', 'stream-json', '--verbose', '--json-schema', json.dumps(schema),
             '--system-prompt', system, '--tools', '', '--strict-mcp-config', '--disable-slash-commands',
-            '--no-session-persistence']
+            '--no-session-persistence', *THINKING_FLAG]
     if effort and effort != 'default':
         args += ['--effort', effort]
     # Started from inside a Claude Code session, the CLI would think it is nested in it.
     env = {key: value for key, value in os.environ.items() if key != 'CLAUDECODE'}
     with tempfile.TemporaryDirectory(prefix='battleship-claude-') as folder:
         result = _run(args, prompt, folder, env)
-    try:
-        data = json.loads(result.stdout)
-    except ValueError:
+        if result.returncode and THINKING_FLAG[0] in (result.stderr or ''):
+            # A CLI too old for the flag still plays, without its thinking.
+            result = _run([arg for arg in args if arg not in THINKING_FLAG], prompt, folder, env)
+    messages = _claude_messages(result.stdout)
+    data = next((item for item in reversed(messages) if item.get('type') == 'result'), None)
+    if data is None:
         raise CLIError('Claude Code CLI: ' + (_tail(result.stderr) or _tail(result.stdout) or f'exited with code {result.returncode}.'))
-    if isinstance(data, list):
-        data = next((item for item in reversed(data) if isinstance(item, dict) and item.get('type') == 'result'), {})
     if data.get('is_error') or data.get('subtype') not in (None, 'success'):
         raise CLIError('Claude Code CLI: ' + (_tail(str(data.get('result') or '')) or str(data.get('subtype') or 'error')))
+    thinking = '\n\n'.join(block.get('thinking') or '' for item in messages if item.get('type') == 'assistant'
+                           for block in (item.get('message') or {}).get('content') or []
+                           if isinstance(block, dict) and block.get('type') == 'thinking' and block.get('thinking'))
     answer = data.get('structured_output')
-    return answer if isinstance(answer, dict) else json_in(data.get('result'))
+    return (answer if isinstance(answer, dict) else json_in(data.get('result'))), thinking
 
 
 def _codex(prompt, system, schema, model, effort):
@@ -217,7 +238,7 @@ def _codex(prompt, system, schema, model, effort):
         raise CLIError('Codex SDK: ' + (_tail(result.stderr) or f'exited with code {result.returncode}.'))
     if data.get('error'):
         raise CLIError('Codex SDK: ' + _tail(data['error']))
-    return json_in(data.get('response'))
+    return json_in(data.get('response')), str(data.get('reasoning') or '')
 
 
 def _call(player, prompt, system, schema, model, effort):
@@ -225,8 +246,8 @@ def _call(player, prompt, system, schema, model, effort):
 
 
 def cli_placement(player, prompt, model, effort):
-    return read_placement(_call(player, prompt, PLACEMENT_SYSTEM, PLACEMENT_SCHEMA, model, effort))
+    return read_placement(*_call(player, prompt, PLACEMENT_SYSTEM, PLACEMENT_SCHEMA, model, effort))
 
 
 def cli_shot(player, prompt, model, effort):
-    return read_shot(_call(player, prompt, FIRE_SYSTEM, FIRE_SCHEMA, model, effort))
+    return read_shot(*_call(player, prompt, FIRE_SYSTEM, FIRE_SCHEMA, model, effort))

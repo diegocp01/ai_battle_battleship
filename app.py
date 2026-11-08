@@ -56,6 +56,7 @@ def new_state(mode='test', players=None):
                 'speed': players[key + '_speed'],
                 'name': players[key + '_name'],
                 'reasoning': '',
+                'thought': '',
                 'last_time': 0.0,
                 'total_time': 0.0,
             } for key in PLAYERS
@@ -144,6 +145,8 @@ def client_state(state, started=True):
             'shots': shots,
             'reasoning': player['reasoning'][:700],
             'notes': player.get('notes', ''),
+            # One line of the model's own reasoning for its last move ('' when it gave none, as in Test mode).
+            'thought': player.get('thought', ''),
             'last_time': round(player['last_time'], 2),
             'total_time': round(player['total_time'], 2),
             'stats': {'shots': len(shots), 'hits': hits, 'sunk': sum(1 for shot in shots if shot['result'] == 'sunk')},
@@ -248,12 +251,13 @@ def place_ships():
         seat = state['players'][player]
         started = time.time()
         try:
+            thought = ''
             if state['mode'] == 'test':
                 placement, reasoning = simulated_placement(SIMULATED_STRATEGY, rng_for(state, player, 'placement'))
             elif state['mode'] == 'cli':
-                placement, reasoning = cli_placement(player, placement_prompt(), seat['model'], seat['effort'])
+                placement, reasoning, thought = cli_placement(player, placement_prompt(), seat['model'], seat['effort'])
             else:
-                placement, reasoning = api_placement(player, placement_prompt(), seat['model'], seat['effort'], seat['speed'])
+                placement, reasoning, thought = api_placement(player, placement_prompt(), seat['model'], seat['effort'], seat['speed'])
         except ProviderError as error:
             return jsonify({'error': f"{seat['name']}: {error}"}), 502
         except Exception as error:  # SDK and network errors
@@ -268,6 +272,7 @@ def place_ships():
         seat['placement'] = {name: {'start': cells[0], 'direction': 'H' if cells[0][1:] == cells[1][1:] else 'V'} for name, cells in fleet.items()}
         seat['ships'] = fleet
         seat['reasoning'] = reasoning or 'Fleet deployed.'
+        seat['thought'] = thought
         # The match memory begins here: the fleet as placed and the plan behind it come back in every shot prompt.
         seat['plan'] = reasoning or ''
         seat['last_time'] = elapsed
@@ -295,13 +300,13 @@ def next_move():
         info = knowledge(shooter, defender)
         started = time.time()
         try:
-            notes = ''
+            notes = thought = ''
             if state['mode'] == 'test':
                 target, reasoning = simulated_shot(player, SIMULATED_STRATEGY, info, rng_for(state, player, turn))
             elif state['mode'] == 'cli':
-                target, reasoning, notes = cli_shot(player, fire_prompt(shooter, info, turn), shooter['model'], shooter['effort'])
+                target, reasoning, notes, thought = cli_shot(player, fire_prompt(shooter, info, turn), shooter['model'], shooter['effort'])
             else:
-                target, reasoning, notes = api_shot(player, fire_prompt(shooter, info, turn), shooter['model'], shooter['effort'], shooter['speed'])
+                target, reasoning, notes, thought = api_shot(player, fire_prompt(shooter, info, turn), shooter['model'], shooter['effort'], shooter['speed'])
         except ProviderError as error:
             return jsonify({'error': f"{shooter['name']}: {error}"}), 502
         except Exception as error:
@@ -315,12 +320,13 @@ def next_move():
             return jsonify({'error': f"{shooter['name']} fired at {requested or repr(target)[:16]}, {problem}. The turn was not played; retry the move."}), 502
         target = requested
         result, ship = fire(defender, target)
-        shot = {'turn': turn, 'target': target, 'result': result, 'ship': ship, 'why': reasoning or ''}
+        shot = {'turn': turn, 'target': target, 'result': result, 'ship': ship, 'why': reasoning or '', 'thought': thought}
         shooter['shots'].append(shot)
         # The player's memory for its next turn: its notes replace the old ones (kept if it wrote none).
         if notes:
             shooter['notes'] = notes
         shooter['reasoning'] = reasoning or 'Fired.'
+        shooter['thought'] = thought
         shooter['last_time'] = elapsed
         shooter['total_time'] += elapsed
         state['turn'] = turn

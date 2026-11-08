@@ -48,19 +48,29 @@ class FakeAnthropic:
             message = NS(stop_reason='refusal', stop_details=NS(category='cyber'), content=[])
         else:
             text = json.dumps(answer(params['output_config']['format']['schema'], 'E5'))
-            message = NS(stop_reason='end_turn', content=[NS(type='thinking', thinking=''), NS(type='text', text=text)])
+            # Thinking text comes back only when it is asked for summarized.
+            summarized = params.get('thinking', {}).get('display') == 'summarized'
+            thought = 'The centre is open. E5 crosses the most places a ship can still fit, so I will fire there.' if summarized else ''
+            message = NS(stop_reason='end_turn', content=[NS(type='thinking', thinking=thought), NS(type='text', text=text)])
         yield NS(get_final_message=lambda: message)
 
 
 class FakeOpenAI:
-    def __init__(self, calls):
-        self.calls = calls
+    def __init__(self, calls, no_summaries=False):
+        self.calls, self.no_summaries = calls, no_summaries
         self.models = NS(list=lambda: [NS(id=i) for i in ('gpt-6-luna', 'gpt-6.1-sol', 'gpt-5.6-nano', 'dall-e-3', 'text-embedding-3-large')])
         self.responses = NS(create=self.create)
 
     def create(self, **params):
         self.calls.append(('openai', params))
-        return NS(status='completed', output_text=json.dumps(answer(params['text']['format']['schema'], 'A1')))
+        summary = params.get('reasoning', {}).get('summary')
+        if summary and self.no_summaries:
+            import httpx, openai
+            raise openai.BadRequestError('Reasoning summaries are not available for this organization.',
+                                         response=httpx.Response(400, request=httpx.Request('POST', 'https://api.openai.com/v1/responses')), body=None)
+        output = [NS(type='reasoning', summary=[NS(type='summary_text', text='**Opening shot**\n\nNo hits yet. A1 starts a sweep from the corner, so I will fire at A1.')] if summary else []),
+                  NS(type='message')]
+        return NS(status='completed', output=output, output_text=json.dumps(answer(params['text']['format']['schema'], 'A1')))
 
 
 CODEX_CATALOG = [
@@ -89,7 +99,7 @@ class APIConnectionTest(unittest.TestCase):
         # Never read the real .env: the tests set their own (fake) keys.
         players._load_env = lambda: None
         anthropic_player._client = lambda: FakeAnthropic(self.calls, refuse=bool(os.getenv('FAKE_REFUSE')))
-        openai_player._client = lambda: FakeOpenAI(self.calls)
+        openai_player._client = lambda: FakeOpenAI(self.calls, no_summaries=bool(os.getenv('FAKE_NO_SUMMARIES')))
         cli_players.codex_catalog = lambda: CODEX_CATALOG
         players.cli_catalog = lambda: {'gpt': {'models': [], 'default': ''}, 'claude': {'models': [], 'default': ''}}
         players.api_catalog(refresh=True)
@@ -142,15 +152,18 @@ class APIConnectionTest(unittest.TestCase):
         self.assertEqual(claude['betas'], ['fast-mode-2026-02-01'])
         self.assertEqual(claude['output_config']['effort'], 'xhigh')
         self.assertEqual(claude['output_config']['format']['type'], 'json_schema')
-        self.assertEqual(claude['thinking'], {'type': 'adaptive'})
+        self.assertEqual(claude['thinking'], {'type': 'adaptive', 'display': 'summarized'})
         self.assertNotIn('fallbacks', claude)
         gpt = calls['openai'][-1]
         self.assertEqual(gpt['model'], 'gpt-6-luna')
-        self.assertEqual(gpt['reasoning'], {'effort': 'high'})
+        self.assertEqual(gpt['reasoning'], {'effort': 'high', 'summary': 'auto'})
         self.assertEqual(gpt['service_tier'], 'priority')
         self.assertTrue(gpt['text']['format']['strict'])
         moves = self.client.get('/api/game-state').get_json()['players']
         self.assertEqual({moves['claude']['shots'][0]['target'], moves['gpt']['shots'][0]['target']}, {'E5', 'A1'})
+        # The legend line comes from each model's reasoning summary.
+        self.assertEqual(moves['claude']['thought'], 'E5 crosses the most places a ship can still fit, so I will fire there.')
+        self.assertEqual(moves['gpt']['thought'], 'A1 starts a sweep from the corner, so I will fire at A1.')
 
     def test_defaults_send_no_effort_and_standard_speed(self):
         self.start(gpt_model='gpt-6-luna', claude_model='claude-opus-5-5')
@@ -160,8 +173,18 @@ class APIConnectionTest(unittest.TestCase):
         self.assertNotIn('speed', claude)
         # Standard speed keeps the server-side fallback for safety declines.
         self.assertEqual((claude['fallbacks'], claude['betas']), ('default', ['server-side-fallback-2026-07-01']))
-        self.assertNotIn('reasoning', gpt)
+        # No effort is sent, only the request for a reasoning summary.
+        self.assertEqual(gpt['reasoning'], {'summary': 'auto'})
         self.assertNotIn('service_tier', gpt)
+
+    def test_move_plays_when_reasoning_summaries_are_refused(self):
+        os.environ['FAKE_NO_SUMMARIES'] = '1'
+        self.start(gpt_model='gpt-6-luna', claude_model='claude-opus-5-5')
+        calls = self.play_two_turns()
+        # Each refused request is asked again without the summary, and the legend falls back to the answer's reason.
+        self.assertEqual([c.get('reasoning') for c in calls['openai'][-2:]], [{'summary': 'auto'}, None])
+        gpt = self.client.get('/api/game-state').get_json()['players']['gpt']
+        self.assertEqual((gpt['thought'], gpt['reasoning']), ('', 'Firing at A1.'))
 
     def test_speed_a_model_lacks_falls_back_to_standard(self):
         state = self.start(gpt_model='gpt-5.6-nano', gpt_speed='priority', claude_model='claude-haiku-5-5', claude_speed='fast').get_json()['game_state']

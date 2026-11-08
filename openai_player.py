@@ -98,18 +98,28 @@ def catalog():
 
 
 def ask(system, prompt, schema, model, effort='default', speed='standard'):
-    """One move: returns the answer as a dict, read from the model's strict JSON output."""
+    """One move: returns (answer, thinking), the answer read from the model's strict JSON output and the summary of
+    its reasoning ('' when the API gave none)."""
     if not os.getenv(KEY):
         raise MoveError(f'Add {KEY} to the .env file in the project folder, then reload.')
     import openai
     params = {'model': model, 'instructions': system, 'input': prompt,
               'text': {'format': {'type': 'json_schema', 'name': 'battleship_move', 'schema': schema, 'strict': True}}}
+    # A summary of the reasoning comes back with the answer, for the legend.
+    params['reasoning'] = {'summary': 'auto'}
     if effort and effort != 'default':
-        params['reasoning'] = {'effort': effort}
+        params['reasoning']['effort'] = effort
     if speed and speed != 'standard' and speed in _tiers.get(model, {speed}):
         params['service_tier'] = speed
     try:
-        response = _client().responses.create(**params)
+        try:
+            response = _client().responses.create(**params)
+        except openai.BadRequestError as error:
+            # Some models or organizations get no reasoning summaries; the move still plays without one.
+            if 'summar' not in str(error.message).lower():
+                raise
+            reasoning = {key: value for key, value in params.pop('reasoning').items() if key != 'summary'}
+            response = _client().responses.create(**params, **({'reasoning': reasoning} if reasoning else {}))
     except openai.AuthenticationError:
         raise MoveError(f'The {KEY} in .env was rejected.')
     except openai.NotFoundError:
@@ -125,4 +135,6 @@ def ask(system, prompt, schema, model, effort='default', speed='standard'):
     if getattr(response, 'status', None) == 'incomplete':
         reason = getattr(getattr(response, 'incomplete_details', None), 'reason', None)
         raise MoveError('The model stopped before answering' + (f' ({reason}).' if reason else '.'))
-    return json_in(response.output_text)
+    thinking = '\n\n'.join(part.text for item in response.output if item.type == 'reasoning'
+                           for part in item.summary or [] if getattr(part, 'text', ''))
+    return json_in(response.output_text), thinking
