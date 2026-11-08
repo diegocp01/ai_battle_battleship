@@ -4,8 +4,9 @@ import { FIGHTERS, fighterDecals } from './ships.js';
 import { place, box, cyl } from './shipkit.js';
 
 // Life in the air: a Black Hawk helicopter flying a lazy circuit round each fleet, rotors turning, and now and then
-// a flight of the fleet's fighters: a V of three or five low over a board (often straight down its length, parallel
-// to the barrier) or across both boards above the barrier, or a pair on combat air patrol high over the battle.
+// a flyover by both fleets' fighters at once: each fleet's formation straight down the length of its own board,
+// parallel to the barrier, both in the same direction and mirrored either side of it; low Vs of three or five, or a
+// pair high over the battle.
 // Sizes are real (75 m squares): the helicopter is 19.8 m long, at about 45 m up; the jets 18 m long.
 //  - They fly real paths: smooth curves at a steady speed, each jet pointing along its path and banked so its lift
 //    carries both its weight and the turn (a coordinated turn), climbing out at the end of a low pass.
@@ -362,6 +363,35 @@ export class AirTraffic {
         return flight;
     }
 
+    // A flyover between turns: both fleets' fighters at the same moment and in the same direction, each straight
+    // down the length of its own board, parallel to the barrier and mirrored either side of it (the same lane, the
+    // same height, the same gentle weave, so they bank as mirror images). Low Vs of three or five, sometimes on
+    // the burners, or a pair high over the battle leaving contrails.
+    launchPair() {
+        const r = Math.random;
+        const toward = r() < .5 ? 1 : -1;
+        const high = r() < .35;
+        const h = high ? 4.3 + r() : 1.9 + r() * .8;
+        const count = high ? 2 : r() < .5 ? 3 : 5;
+        const trails = high ? r() < .7 : r() < .45;
+        const burner = !high && r() < .25;
+        const offset = (r() - .5) * 3, weave = [(r() - .5) * 2, (r() - .5) * 1.2, (r() - .5) * 1.6];
+        return ['gpt', 'claude'].map(team => {
+            const center = this.t.grid.center(team);
+            // Measured outward from the wall, so the two lanes mirror each other across it.
+            const out = Math.sign(center.x) || 1;
+            const lane = (dx) => center.x + out * (offset + dx);
+            const points = high
+                ? [[lane(0), h, -40], [lane(weave[0] * .5), h + .2, 0], [lane(weave[1]), h + .4, 36]]
+                : [[lane(weave[0]), h + .5, -70], [lane(weave[1] * .5), h, -24], [lane(0), h, -4], [lane(weave[2] * .5), h + .1, 12], [lane(weave[2]), h + 2.6, 40]];
+            return this.launchFlight('along', {
+                team, count, trails, burner, speed: high ? 3.4 : 3,
+                points: points.map(([x, y, z]) => [x, y, z * toward]),
+                trailStyle: high ? {width: .012, spread: .16, life: 14, opacity: .55} : undefined,
+            });
+        });
+    }
+
     // The opening flyover, once both fleets are deployed and before the first shot: each fleet's fighters in a V
     // straight down the length of its own board, side by side on either side of the barrier, trailing smoke in
     // their fleet's colour, then pulling up over the near end. Resolves as they cross the middle of the boards.
@@ -461,7 +491,7 @@ export class AirTraffic {
         this.clock += dt;
         this.nextFlight -= dt;
         if (this.nextFlight <= 0 && !this.t.attract) {
-            this.launchFlight();
+            this.launchPair();
             this.nextFlight = 28 + Math.random() * 22;
         }
         this.flights = this.flights.filter(flight => {

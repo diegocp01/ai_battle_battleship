@@ -8,6 +8,8 @@ import { NO_REFLECTION_LAYER } from './ocean.js';
 export const COLUMNS = 'ABCDEFGHIJ';
 // Each fleet's maker's logo, beside the model's name on its banner: white silhouettes on transparent backgrounds.
 const LOGOS = {gpt: '/static/img/logo-chatgpt.png', claude: '/static/img/logo-claude.png'};
+// The banner's colour: OpenAI's mark and the GPT model's name in white, Claude's in its orange.
+const bannerColor = (team, colors) => (team === 'gpt' ? '#ffffff' : colors[team]);
 export const GRID_SIZE = 10;
 
 export class Battlefield {
@@ -57,7 +59,7 @@ export class Battlefield {
         };
         for (let c = 0; c < GRID_SIZE; c++) make(COLUMNS[c], x0 + c + .5, z0 - .45, .34);
         for (let r = 0; r < GRID_SIZE; r++) make(String(r + 1), x0 - .5, z0 + r + .5, .34);
-        const banner = make(name, x0 + 5, z0 - 1.25, .62, bannerTexture(name.toUpperCase(), this.colors[team], LOGOS[team]));
+        const banner = make(name, x0 + 5, z0 - 1.25, .62, bannerTexture(name.toUpperCase(), bannerColor(team, this.colors), LOGOS[team]));
         banner.position.y = .55;
         banner.scale.set(3.4, .64, 1);
         banner.userData.banner = team;
@@ -70,7 +72,7 @@ export class Battlefield {
             const team = label.userData.banner;
             if (!team || !names[team] || label.userData.text === names[team]) continue;
             label.material.map.dispose();
-            label.material.map = bannerTexture(names[team].toUpperCase(), this.colors[team], LOGOS[team]);
+            label.material.map = bannerTexture(names[team].toUpperCase(), bannerColor(team, this.colors), LOGOS[team]);
             label.material.needsUpdate = true;
             label.userData.text = names[team];
         }
