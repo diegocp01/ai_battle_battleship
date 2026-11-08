@@ -449,6 +449,8 @@ export function shipMaterials(shared, ship, textures) {
         canvas: paint(0x77766a, .9, 0),
         orange: paint(0xd25a22, .6, 0),
         jet: weathering(paint(0x8d949b, .52, .15), shared, ship, {rust: .05, ember: false}),
+        // The fleet's fighters: the Claude fleet flies its clay-orange stealth fighters.
+        fighter: ship.fighter ? weathering(paint(ship.fighter, .5, .12), shared, ship, {rust: .03, ember: false}) : null,
         vls: weathering(paint(0xffffff, .72, .12, {map: textures.vls}), shared, ship, {rust: .1}),
         rail: new THREE.MeshStandardMaterial({color: 0xd0d2cf, roughness: .5, metalness: .4, map: textures.rail, alphaTest: .5, side: THREE.DoubleSide}),
         team: paint(ship.teamColor.value, .45, .1),

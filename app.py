@@ -14,7 +14,7 @@ import uuid
 from flask import Flask, jsonify, render_template, request
 
 from battleship import SHIPS, fire, fire_prompt, fleet_destroyed, knowledge, new_player, normalize_coord, \
-    placement_prompt, random_placement, validate_placement
+    placement_prompt, validate_placement
 from players import MODES, SIMULATED_STRATEGY, ProviderError, api_placement, api_shot, cli_placement, cli_shot, model_catalog, \
     select_models, simulated_placement, simulated_shot
 
@@ -261,10 +261,9 @@ def place_ships():
         elapsed = time.time() - started
         fleet, problem = validate_placement(placement)
         if problem:
-            # A model that breaks the rules still gets a legal fleet, and the panel says why.
-            placement = random_placement(rng_for(state, player, 'fallback'))
-            fleet, _ = validate_placement(placement)
-            reasoning = f'Its placement was illegal ({problem}) so the fleet was deployed at random.'
+            # An illegal fleet stops the match: nothing is placed for it, and the move can be retried. The app
+            # never deploys a fleet on a model's behalf, so results only ever reflect the model's own play.
+            return jsonify({'error': f"{seat['name']} placed an illegal fleet ({problem}). Nothing was placed; retry the move."}), 502
         # Store the normalized layout, read back from the validated cells.
         seat['placement'] = {name: {'start': cells[0], 'direction': 'H' if cells[0][1:] == cells[1][1:] else 'V'} for name, cells in fleet.items()}
         seat['ships'] = fleet
@@ -293,7 +292,6 @@ def next_move():
         turn = state['turn'] + 1
         info = knowledge(shooter, defender)
         started = time.time()
-        note = ''
         try:
             label = 'Player A (GPT)' if player == 'gpt' else 'Player B (Claude)'
             if state['mode'] == 'test':
@@ -309,15 +307,15 @@ def next_move():
         elapsed = time.time() - started
         requested = normalize_coord(target)
         if not requested or requested in info['fired']:
-            # Repeated or malformed coordinates are corrected so the game keeps moving.
-            target, _ = simulated_shot(player, SIMULATED_STRATEGY, info, rng_for(state, player, f'fix{turn}'))
-            note = f"Asked for {requested or repr(target)[:12]}, which {'was already fired at' if requested else 'is not a cell'}; fired at {target} instead. "
-        else:
-            target = requested
+            # An invalid or repeated shot stops the match: the turn is not played and can be retried. The app never
+            # fires a shot on a model's behalf, so saved results only ever reflect the model's own moves.
+            problem = 'which it already fired at' if requested else 'which is not a cell on the grid'
+            return jsonify({'error': f"{shooter['name']} fired at {requested or repr(target)[:16]}, {problem}. The turn was not played; retry the move."}), 502
+        target = requested
         result, ship = fire(defender, target)
         shot = {'turn': turn, 'target': target, 'result': result, 'ship': ship}
         shooter['shots'].append(shot)
-        shooter['reasoning'] = note + (reasoning or 'Fired.')
+        shooter['reasoning'] = reasoning or 'Fired.'
         shooter['last_time'] = elapsed
         shooter['total_time'] += elapsed
         state['turn'] = turn

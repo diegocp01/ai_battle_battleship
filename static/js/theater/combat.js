@@ -444,7 +444,7 @@ export class Combat {
         const deckStart = carrier.body.localToWorld(cat.start.clone());
         const deckEnd = carrier.body.localToWorld(cat.end.clone());
         const scale = 1.15 * carrier.scale.x;
-        const jet = jetMesh(carrier.materials, scale);
+        const jet = jetMesh(carrier.materials, scale, carrier.team);
         jet.traverse(o => { if (o.isMesh) o.castShadow = true; });
         // The bomb stays on the centreline station all the way in.
         const slung = new THREE.Mesh(this.bombGeometry, this.bombMaterial);
