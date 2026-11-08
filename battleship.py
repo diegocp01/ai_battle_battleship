@@ -115,7 +115,8 @@ def new_player():
         'ships': {},           # ship → [cells]
         'hits_taken': {name: [] for name in SHIPS},
         'sunk': [],            # ships lost, in order
-        'shots': [],           # shots this player fired: {'turn', 'target', 'result', 'ship'}
+        'shots': [],           # shots this player fired: {'turn', 'target', 'result', 'ship', 'why'}
+        'notes': '',           # the player's notes to itself, carried from one turn to the next in this match
     }
 
 
@@ -188,13 +189,16 @@ Return every ship's start cell and direction, and one short sentence about your 
 
 
 def fire_prompt(player_name, shooter, info, turn):
-    recent = shooter['shots'][-12:]
-    history = '\n'.join(
-        f"Turn {shot['turn']}: {shot['target']} → " + (f"SUNK the {shot['ship']}" if shot['result'] == 'sunk' else shot['result'].upper())
-        for shot in recent
-    ) or 'No shots yet. This is your first shot.'
-    if len(shooter['shots']) > len(recent):
-        history = f'(last {len(recent)} of {len(shooter["shots"])} shots)\n' + history
+    # The player's memory of this match: every shot it has fired, what came of it and what it was thinking at the
+    # time, and the notes it left itself last turn. It starts empty with every new match.
+    def entry(shot):
+        result = f"SUNK the {shot['ship']}" if shot['result'] == 'sunk' else shot['result'].upper()
+        why = (shot.get('why') or '').strip()
+        if len(why) > 140:
+            why = why[:137].rstrip() + '...'
+        return f"Turn {shot['turn']}: {shot['target']} → {result}" + (f' (you thought: "{why}")' if why else '')
+    history = '\n'.join(entry(shot) for shot in shooter['shots']) or 'No shots yet. This is your first shot.'
+    notes = (shooter.get('notes') or '').strip() or 'None yet.'
     fired = ', '.join(sorted(info['fired'], key=lambda c: (to_index(c)[1], to_index(c)[0]))) or 'none'
     afloat = ', '.join(f'{name} ({SHIPS[name]})' for name in info['remaining'])
     sunk = ', '.join(info['sunk']) or 'none yet'
@@ -208,9 +212,14 @@ Legend: X = hit on a ship still afloat, # = part of a sunk ship, O = miss, . = n
 ENEMY SHIPS STILL AFLOAT: {afloat}
 ENEMY SHIPS SUNK: {sunk}
 
-YOUR RECENT SHOTS:
+YOUR MEMORY OF THIS MATCH
+Every shot you have fired, what it hit, and what you were thinking:
 {history}
+
+Your notes from your last turn:
+{notes}
 
 CELLS ALREADY FIRED AT (never repeat these): {fired}
 
-Choose ONE new cell to fire at, like E5 or J10, and give a one-sentence explanation."""
+Choose ONE new cell to fire at, like E5 or J10, give a one-sentence explanation, and write your updated notes to
+yourself (what you know about the enemy fleet and your plan) for your next turns."""

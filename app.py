@@ -294,12 +294,13 @@ def next_move():
         started = time.time()
         try:
             label = 'Player A (GPT)' if player == 'gpt' else 'Player B (Claude)'
+            notes = ''
             if state['mode'] == 'test':
                 target, reasoning = simulated_shot(player, SIMULATED_STRATEGY, info, rng_for(state, player, turn))
             elif state['mode'] == 'cli':
-                target, reasoning = cli_shot(player, fire_prompt(label, shooter, info, turn), shooter['model'], shooter['effort'])
+                target, reasoning, notes = cli_shot(player, fire_prompt(label, shooter, info, turn), shooter['model'], shooter['effort'])
             else:
-                target, reasoning = api_shot(player, fire_prompt(label, shooter, info, turn), shooter['model'], shooter['effort'], shooter['speed'])
+                target, reasoning, notes = api_shot(player, fire_prompt(label, shooter, info, turn), shooter['model'], shooter['effort'], shooter['speed'])
         except ProviderError as error:
             return jsonify({'error': f"{shooter['name']}: {error}"}), 502
         except Exception as error:
@@ -313,8 +314,11 @@ def next_move():
             return jsonify({'error': f"{shooter['name']} fired at {requested or repr(target)[:16]}, {problem}. The turn was not played; retry the move."}), 502
         target = requested
         result, ship = fire(defender, target)
-        shot = {'turn': turn, 'target': target, 'result': result, 'ship': ship}
+        shot = {'turn': turn, 'target': target, 'result': result, 'ship': ship, 'why': (reasoning or '')[:300]}
         shooter['shots'].append(shot)
+        # The player's memory for its next turn: its notes replace the old ones (kept if it wrote none).
+        if notes:
+            shooter['notes'] = notes
         shooter['reasoning'] = reasoning or 'Fired.'
         shooter['last_time'] = elapsed
         shooter['total_time'] += elapsed

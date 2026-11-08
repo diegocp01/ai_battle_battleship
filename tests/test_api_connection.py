@@ -84,7 +84,10 @@ class APIConnectionTest(unittest.TestCase):
         import anthropic_player, cli_players, openai_player, players
         self.calls = []
         self.patches = [(anthropic_player, '_client', anthropic_player._client), (openai_player, '_client', openai_player._client),
-                        (cli_players, 'codex_catalog', cli_players.codex_catalog), (players, 'cli_catalog', players.cli_catalog)]
+                        (cli_players, 'codex_catalog', cli_players.codex_catalog), (players, 'cli_catalog', players.cli_catalog),
+                        (players, '_load_env', players._load_env)]
+        # Never read the real .env: the tests set their own (fake) keys.
+        players._load_env = lambda: None
         anthropic_player._client = lambda: FakeAnthropic(self.calls, refuse=bool(os.getenv('FAKE_REFUSE')))
         openai_player._client = lambda: FakeOpenAI(self.calls)
         cli_players.codex_catalog = lambda: CODEX_CATALOG
