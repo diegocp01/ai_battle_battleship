@@ -484,7 +484,7 @@ export class Effects {
                 if (hull.secondary) this.later(.4 + r() * .4, () => this.pop(at.clone().add(new THREE.Vector3((r() - .5) * .2, .03, (r() - .5) * .2)), .6 * size, true));
             }
             this.onShake(at, .4 * size);
-            if (sound) this.onSound('explosion', at, Math.max(.25, size));
+            if (sound) this.onSound('explosion', at, Math.max(.25, size), {weapon: kind, ship, waterline: wet, mass: round?.mass});
         };
         if (physics.delay) this.later(physics.delay, burst); else burst();
     }

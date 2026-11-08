@@ -1,4 +1,4 @@
-import { SOUND_BANK, soundKey, loadSoundBank } from './sound-bank.js';
+import { SOUND_BANK, soundKey, impactVoice, loadSoundBank } from './sound-bank.js';
 
 // Local ElevenLabs v3 recordings with Web Audio synthesis as a loading/offline fallback:
 // missile and jet roars, torpedo runs, a hull groaning as it sinks, ship horns, fireworks and the sea.
@@ -105,8 +105,10 @@ export class BattleAudio {
             disconnect: () => { input.disconnect(); panner.disconnect(); wet.disconnect(); }};
     }
 
-    playSample(kind, at, scale) {
-        const key = soundKey(kind, scale);
+    playSample(kind, at, scale, impact = {}) {
+        let key = soundKey(kind, scale, impact);
+        // Retain the known-good generic hit if a specialized asset has not loaded.
+        if (!this.samples.has(key) && kind === 'explosion') key = 'explosion';
         const buffer = this.samples.get(key);
         if (!buffer) return false;
         const spec = SOUND_BANK[key];
@@ -114,7 +116,8 @@ export class BattleAudio {
         const source = ctx.createBufferSource();
         source.buffer = buffer;
         // Preserve each weapon's character while avoiding identical repeated shots.
-        const rate = .97 + Math.random() * .06;
+        const voice = kind === 'explosion' ? impactVoice(impact) : {rate: 1, cutoff: 0};
+        const rate = (.97 + Math.random() * .06) * voice.rate;
         source.playbackRate.value = rate;
         const duration = spec.timed ? Math.max(.1, Math.min(scale, buffer.duration / rate)) : buffer.duration / rate;
         const output = this.out(at, key === 'creak' ? .16 : .08);
@@ -124,7 +127,13 @@ export class BattleAudio {
         gain.gain.linearRampToValueAtTime(level, output.start + .005);
         gain.gain.setValueAtTime(level, output.start + Math.max(.005, duration - .08));
         gain.gain.linearRampToValueAtTime(0, output.start + duration);
-        source.connect(gain).connect(output.input);
+        let tone = null;
+        if (voice.cutoff) {
+            tone = ctx.createBiquadFilter();
+            tone.type = 'lowpass'; tone.frequency.value = voice.cutoff; tone.Q.value = .7;
+            source.connect(tone).connect(gain);
+        } else source.connect(gain);
+        gain.connect(output.input);
         // Secondary explosions can overlap; bound their CPU and loudness cost.
         if (this.sampleVoices.size >= 24) {
             const oldest = this.sampleVoices.values().next().value;
@@ -134,7 +143,7 @@ export class BattleAudio {
         this.sampleVoices.add(source);
         source.onended = () => {
             this.sampleVoices.delete(source);
-            source.disconnect(); gain.disconnect(); output.disconnect();
+            source.disconnect(); tone?.disconnect(); gain.disconnect(); output.disconnect();
         };
         source.start(output.start);
         source.stop(output.start + duration);
@@ -205,9 +214,9 @@ export class BattleAudio {
         }
     }
 
-    play(kind, at, scale = 1) {
+    play(kind, at, scale = 1, impact = {}) {
         if (!this.ctx || this.muted || this.ctx.state !== 'running') return;
-        if (this.playSample(kind, at, scale)) return;
+        if (this.playSample(kind, at, scale, impact)) return;
         // Distinct missile samples share the original rocket synthesis if unavailable.
         if (kind === 'missileLight' || kind === 'subMissile') kind = 'missile';
         const ctx = this.ctx;

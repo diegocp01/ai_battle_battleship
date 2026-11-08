@@ -24,8 +24,8 @@ import { LayerRenderPass, AmbientOcclusionPass, ShadowFocus, FX_LAYER } from './
 // source of truth. Sky, sea, ships and fire are generated in code; battle audio uses local recordings.
 
 export const TEAMS = {
-    gpt: {id: 'gpt', name: 'GPT', color: '#3d8bff', paint: 0x838b92, superstructure: 0x939aa0, logo: '/static/img/logo-chatgpt.png'},
-    claude: {id: 'claude', name: 'Claude', color: '#ff8552', paint: 0x88898a, superstructure: 0x979897, logo: '/static/img/logo-claude.png'},
+    gpt: {id: 'gpt', name: 'GPT', color: '#3d8bff', paint: 0x838b92, superstructure: 0x939aa0, mascot: '/static/img/mascot-codex.png'},
+    claude: {id: 'claude', name: 'Claude', color: '#ff8552', paint: 0x88898a, superstructure: 0x979897, mascot: '/static/img/mascot-claude.png'},
 };
 const ORIGINS = {gpt: [-11.5, -5], claude: [1.5, -5]};
 const SIZES = {Carrier: 5, Battleship: 4, Cruiser: 3, Submarine: 3, Destroyer: 2};
@@ -198,8 +198,8 @@ export class Theater {
             vls: vlsTexture(),
             rail: railTexture(),
             flags: {
-                gpt: flagMaterial(flagTexture(TEAMS.gpt.color, TEAMS.gpt.logo), this.shared),
-                claude: flagMaterial(flagTexture(TEAMS.claude.color, TEAMS.claude.logo), this.shared),
+                gpt: flagMaterial(flagTexture(TEAMS.gpt.color, TEAMS.gpt.mascot), this.shared),
+                claude: flagMaterial(flagTexture(TEAMS.claude.color, TEAMS.claude.mascot), this.shared),
             },
         };
         this.audio = new BattleAudio();
@@ -211,7 +211,7 @@ export class Theater {
         this.effects = new Effects(scene, {
             atlas: this.textures.atlas, ocean: this.ocean, env: this.env,
             onShake: (at, strength) => this.director.addShake(at, strength),
-            onSound: (kind, at, scale) => this.audio.play(kind, at, scale),
+            onSound: (kind, at, scale, impact) => this.audio.play(kind, at, scale, impact),
         });
         this.effects.mesh.layers.set(FX_LAYER);
         this.shadowFocus = new ShadowFocus(this.env.key, camera);
