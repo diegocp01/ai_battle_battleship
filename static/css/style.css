@@ -209,6 +209,14 @@ body.is-menu .match-hud { display: none; }
 .phase-line { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--muted); white-space: nowrap; }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #ff453a; box-shadow: 0 0 0 3px rgb(255 69 58 / 25%); animation: live 1.6s ease-in-out infinite; }
 .arena-paused .live-dot, body:not(.is-live) .live-dot { background: #8e8e93; box-shadow: none; animation: none; }
+/* Each model's latest reasoning, typed out under its mascot */
+.thoughts { position: absolute; top: calc(var(--edge) + 90px); left: 50%; translate: -50% 0; width: min(860px, calc(100% - 2 * var(--edge) - 2 * 326px)); display: grid; grid-template-columns: 1fr 1fr; gap: 32px; padding: 0 26px; pointer-events: none !important; }
+.thought { --side: var(--gpt-fleet); margin: 0; padding-left: 11px; border-left: 2px solid var(--side); font-size: 13px; line-height: 1.42; font-weight: 500; color: rgb(255 255 255 / 94%); text-shadow: 0 1px 2px rgb(0 0 0 / 75%), 0 0 14px rgb(0 0 0 / 60%); opacity: .74; transition: opacity .6s; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.claude-thought { --side: var(--claude-fleet); padding: 0 11px 0 0; border-left: 0; border-right: 2px solid var(--side); text-align: right; }
+.thought.latest { opacity: 1; }
+.thought.empty { visibility: hidden; }
+.thought.typing [data-typed]::after { content: ""; display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; vertical-align: -2px; background: var(--side); animation: caret .9s steps(1) infinite; }
+@keyframes caret { 50% { opacity: 0; } }
 .fleet-pips { display: flex; gap: 3px; margin-top: 5px; }
 .fleet-pips i { position: relative; width: calc(var(--len) * 5px); height: 6px; border-radius: 3px 6px 6px 3px; background: linear-gradient(180deg, color-mix(in srgb, var(--mark-color) 70%, #fff), var(--mark-color)); box-shadow: 0 0 8px -2px var(--mark-color); transition: background .4s, opacity .4s; }
 .claude-side .fleet-pips i { border-radius: 6px 3px 3px 6px; }
@@ -261,8 +269,8 @@ body.is-menu .match-hud { display: none; }
 .status-dot.error { background: #ff453a; }
 
 /* Overlay hidden: just the battle, the banner and the view controls. */
-body.hud-hidden .scoreboard, body.hud-hidden .match-center { opacity: 0; pointer-events: none !important; transform: translateY(8px); }
-.scoreboard, .match-center { transition: opacity .35s, transform .45s var(--spring); }
+body.hud-hidden .scoreboard, body.hud-hidden .match-center, body.hud-hidden .thoughts { opacity: 0; pointer-events: none !important; transform: translateY(8px); }
+.scoreboard, .match-center, .thoughts { transition: opacity .35s, transform .45s var(--spring); }
 
 /* History dialog */
 .history-dialog { width: min(760px, calc(100% - 32px)); max-height: min(80vh, 720px); padding: 18px 20px 20px; border: 0; border-radius: 30px; color: var(--ink); background: var(--glass-strong); }
@@ -298,6 +306,7 @@ body.is-menu .error-banner { top: auto; bottom: var(--edge); left: auto; right: 
 @media (max-width: 1020px) {
     .match-center { width: calc(100% - 2 * var(--edge)); }
     .scoreboard { top: calc(var(--edge) + 50px); width: calc(100% - 2 * var(--edge)); }
+    .thoughts { top: calc(var(--edge) + 140px); width: calc(100% - 2 * var(--edge)); }
 }
 @media (max-width: 760px) {
     :root { --edge: 12px; }
@@ -307,6 +316,8 @@ body.is-menu .error-banner { top: auto; bottom: var(--edge); left: auto; right: 
     .score-side .avatar { width: 40px; height: 40px; margin: -4px 0; }
     .score-side h2 { font-size: 13px; }
     .score-big { font-size: 28px; }
+    .thoughts { top: calc(var(--edge) + 122px); gap: 14px; padding: 0 8px; }
+    .thought { font-size: 11.5px; -webkit-line-clamp: 4; }
     .player-activity { font-size: 11px; }
     .fleet-pips i { width: calc(var(--len) * 3.4px); height: 5px; }
     .score-center { min-width: 70px; }

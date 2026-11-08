@@ -897,6 +897,24 @@ export class Effects {
         return fire;
     }
 
+    // Fuel and oil burning on the water round a sinking ship: it keeps burning, with its black smoke, for the rest
+    // of the battle, after the fires on her decks have gone under.
+    oilFire(at, scale = 1, delay = 0) {
+        const r = Math.random;
+        const anchor = new THREE.Object3D();
+        anchor.position.set(at.x, .012, at.z);
+        this.scene.add(anchor);
+        const fire = this.makeFire(anchor, scale, {owned: true, delay});
+        for (let i = 0; i < 2; i++) {
+            const node = new THREE.Object3D();
+            node.position.set((r() - .5) * .22 * scale, 0, (r() - .5) * .16 * scale);
+            anchor.add(node);
+            fire.sources.push({node, weight: .35 + r() * .3, flame: 0, tongue: 0, smoke: 0, phase: r() * 10});
+        }
+        this.fires.push(fire);
+        return fire;
+    }
+
     // Torn steel left at a hit: plates ripped up and bent outward around the hole, charred black, a few still
     // glowing at the torn edge. Attached to the hit, so it rides, lists and sinks with the ship.
     scar(anchor, scale = 1) {

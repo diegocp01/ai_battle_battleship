@@ -88,6 +88,10 @@
                 <span class="score-center"><span class="vs">vs</span><small id="turn-counter">Deploying</small><span class="phase-line"><span class="live-dot" aria-hidden="true"></span><span id="phase-text">Fleet deployment</span></span></span>
                 {{ score_side('claude', 'Claude') }}
             </div>
+            <!-- Each model's latest reasoning, typed out under its mascot -->
+            <div class="thoughts">
+                {% for model in ['gpt', 'claude'] %}<p class="thought {{ model }}-thought empty" id="{{ model }}-thought"><span class="visually-hidden" id="{{ model }}-thought-text"></span><span aria-hidden="true" data-typed></span></p>{% endfor %}
+            </div>
 
 
             <div class="match-center">
