@@ -225,4 +225,18 @@ export function tug(b, x, y, z, yaw = 0) {
     b.add('dark', place(box(.008, .008, .014), [0, 0, 0], [0, yaw, 0]), [x - Math.cos(yaw) * .006, y + .016, z + Math.sin(yaw) * .006]);
 }
 
+// A sailor, 1.8 m tall: a body in the colour of the job and a helmet or head.
+export function sailor(b, x, y, z, material) {
+    b.add(material, new THREE.CapsuleGeometry(.0036, .012, 2, 6), [x, y + .0096, z]);
+    b.add('white', sphere(.0028, 6, 4), [x, y + .0205, z]);
+}
+
+// A handful of sailors scattered round a point.
+export function crewGroup(b, x, y, z, materials, count = 3, spread = .03) {
+    for (let i = 0; i < count; i++) {
+        const a = rand() * Math.PI * 2, d = Math.sqrt(rand()) * spread;
+        sailor(b, x + Math.cos(a) * d, y, z + Math.sin(a) * d * .7, materials[Math.floor(rand() * materials.length)]);
+    }
+}
+
 export { rand };

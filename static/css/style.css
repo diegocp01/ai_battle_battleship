@@ -212,8 +212,7 @@ body.is-menu .match-hud { display: none; }
 .fleet-pips i.sunk::after { content: ""; position: absolute; left: -2px; right: -2px; top: 50%; height: 1.5px; translate: 0 -50%; background: var(--hit); border-radius: 1px; }
 .avatar { position: relative; flex: none; display: grid; place-items: center; width: 46px; height: 46px; }
 .mascot { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 4px 6px rgb(0 0 0 / 35%)); }
-.avatar .mark { position: absolute; right: -6px; bottom: -4px; width: 18px; height: 18px; }
-.match-hud:has(#gpt-panel.is-thinking) .gpt-side .mascot, .match-hud:has(#claude-panel.is-thinking) .claude-side .mascot { filter: drop-shadow(0 0 9px color-mix(in srgb, var(--mark-color) 85%, transparent)) drop-shadow(0 4px 6px rgb(0 0 0 / 30%)); animation: mascot-think .9s ease-in-out infinite alternate; }
+.score-side.is-thinking .mascot { filter: drop-shadow(0 0 9px color-mix(in srgb, var(--mark-color) 85%, transparent)) drop-shadow(0 4px 6px rgb(0 0 0 / 30%)); animation: mascot-think .9s ease-in-out infinite alternate; }
 @keyframes mascot-think { to { transform: translateY(-3px) rotate(-3deg); } }
 .crown { --tilt: -10deg; position: absolute; left: 50%; top: -17px; z-index: 1; width: 32px; height: auto; opacity: 0; transform: translateX(-50%) translateY(-12px) rotate(var(--tilt)) scale(.4); transform-origin: 50% 100%; filter: drop-shadow(0 2px 3px rgb(0 0 0 / 35%)); pointer-events: none; transition: transform .5s cubic-bezier(.34, 1.56, .64, 1), opacity .2s; }
 .claude-side .crown { --tilt: 10deg; }
@@ -228,17 +227,6 @@ body.is-menu .match-hud { display: none; }
 .thinking-dots i:nth-child(3) { animation-delay: .3s; }
 .timer { font-variant-numeric: tabular-nums; }
 
-/* Board tags: each fleet's ships afloat and its latest explanation, floating on the water under its board.
-   The theater places them every frame (--tag-x, --tag-y, --tag-scale, --tag-opacity). No panel behind them. */
-.board-tag { --side: var(--gpt); position: absolute; left: 0; top: 0; display: grid; justify-items: center; gap: 7px; width: var(--tag-width, 380px); pointer-events: none !important; text-align: center; opacity: var(--tag-opacity, 0); transform: translate3d(var(--tag-x, -9999px), var(--tag-y, -9999px), 0) translateX(-50%) scale(var(--tag-scale, 1)); transform-origin: 50% 0; text-shadow: 0 1px 2px rgb(0 0 0 / 70%), 0 0 14px rgb(0 12 32 / 55%); }
-.claude-tag { --side: var(--claude); }
-.fleet-icons { list-style: none; margin: 0; padding: 0; display: flex; align-items: flex-end; gap: 11px; color: var(--side); filter: drop-shadow(0 1px 1.5px rgb(0 0 0 / 75%)); }
-.fleet-icons li { position: relative; line-height: 0; transition: opacity .5s, color .5s; }
-.fleet-icons svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.35; stroke-linecap: round; stroke-linejoin: round; }
-.fleet-icons li.damaged::after { content: ""; position: absolute; top: -4px; right: 1px; width: 4px; height: 4px; border-radius: 50%; background: var(--hit); box-shadow: 0 0 5px var(--hit); }
-.fleet-icons li.sunk { color: #fff; opacity: .28; }
-.tag-reasoning { margin: 0; max-width: 100%; font-size: 13px; line-height: 1.4; font-weight: 500; color: rgb(242 246 252 / 94%); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; transition: opacity .4s; }
-.board-tag.is-thinking .tag-reasoning { opacity: .5; }
 
 /* Commentary and controls, bottom center */
 .match-center { position: absolute; left: 50%; bottom: var(--edge); translate: -50% 0; width: min(620px, calc(100% - 2 * var(--edge))); display: grid; justify-items: center; gap: 10px; }
@@ -269,7 +257,6 @@ body.is-menu .match-hud { display: none; }
 
 /* Overlay hidden: just the battle, the banner and the view controls. */
 body.hud-hidden .scoreboard, body.hud-hidden .match-center { opacity: 0; pointer-events: none !important; transform: translateY(8px); }
-body.hud-hidden .board-tag { visibility: hidden; }
 .scoreboard, .match-center { transition: opacity .35s, transform .45s var(--spring); }
 
 /* History dialog */
@@ -305,7 +292,6 @@ body.is-menu .error-banner { top: auto; bottom: var(--edge); left: auto; right: 
 }
 @media (max-width: 1020px) {
     .match-center { width: calc(100% - 2 * var(--edge)); }
-    .tag-reasoning { font-size: 12px; -webkit-line-clamp: 2; line-clamp: 2; }
     .scoreboard { top: calc(var(--edge) + 50px); width: calc(100% - 2 * var(--edge)); }
 }
 @media (max-width: 760px) {
@@ -320,8 +306,6 @@ body.is-menu .error-banner { top: auto; bottom: var(--edge); left: auto; right: 
     .fleet-pips i { width: calc(var(--len) * 3.4px); height: 5px; }
     .score-center { min-width: 70px; }
     .phase-line { display: none; }
-    .tag-reasoning { display: none; }
-    .fleet-icons { gap: 7px; }
     .match-controls .series-details { display: none; }
     #game-status { font-size: 15px; }
 }

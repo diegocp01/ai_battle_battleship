@@ -65,7 +65,14 @@ export class Combat {
                 }
             }
             if (p.kind && dt > 0) fx.trail(p.kind, position, p.velocity, dt, k, from, p);
-            if (p.primary) this.t.director.follow(position, k);
+            if (p.primary) {
+                this.t.director.follow(position, k, p.duration);
+                // The last moments before impact play in slow motion while the drone flies beside the round.
+                if (k > .84 && !p.slowed && this.t.director.mode === 'cinematic' && this.t.director.shot) {
+                    p.slowed = true;
+                    this.t.slowMotion(.4, .5);
+                }
+            }
             if (p.onStep) p.onStep(k, position, p);
             if (k >= 1) {
                 if (p.mesh && !p.keepMesh) this.t.scene.remove(p.mesh);
@@ -127,7 +134,8 @@ export class Combat {
             impact = T.grid.cellCenter(defender, shot.target).add(new THREE.Vector3((Math.random() - .5) * .28, 0, (Math.random() - .5) * .28));
         }
         const shooter = T.fleets[attacker]?.pickShooter();
-        const close = shot.result !== 'miss' || Math.random() < .3;
+        // Cinematic mode covers every shot; the tactical view spends less time on a miss.
+        const close = T.director.mode === 'cinematic' || shot.result !== 'miss' || Math.random() < .3;
         T.grid.lockOn(defender, shot.target, color);
         T.audio.play('lock');
         const origin = shooter ? shooter.root.position.clone() : T.grid.center(attacker);
@@ -156,6 +164,11 @@ export class Combat {
             T.effects.explosion(burst, shot.result === 'sunk' ? 1.25 : 1, {water: !!context.torpedo, kind, ship: victim.type, waterline: context.waterline});
             if (context.torpedo) T.effects.splash(impact.clone().setY(0), 1.1, {sound: false});
             victim.addBurn(local.x, local.z, .16 + victim.beam * .3);
+            const size = {gun: .6, salvo: 1.4, missile: 1.2, subMissile: 1.2, strike: 1.6, torpedo: 1.3}[kind] ?? 1;
+            for (const at of victim.damage({x: local.x, y: anchor.position.y, z: local.z}, {waterline: context.waterline || kind === 'torpedo', size})) {
+                T.effects.debris.burst(at, 5, .8, 3);
+                T.effects.pop(at, .32, false);
+            }
             victim.burningCells.add(shot.target);
             T.effects.addFire(anchor, (FIRE_BY_WEAPON[kind] ?? 1) * (FIRE_BY_SHIP[victim.type] ?? 1));
             T.grid.markHit(defender, shot.target);
@@ -212,6 +225,7 @@ export class Combat {
             const muzzle = turret.muzzles[i];
             const start = muzzle.getWorldPosition(new THREE.Vector3());
             const dir = new THREE.Vector3(1, 0, 0).transformDirection(muzzle.matrixWorld);
+            if (i === 0) T.director.cueLaunch({at: start, dir, scale: 2.3});
             T.effects.muzzle(start, dir, 1.85);
             this.recoil(turret.barrels[i]);
             if (i === 0) {
@@ -250,9 +264,10 @@ export class Combat {
     }
 
     chooseTurret(ship, target) {
-        // The turret that needs the least traverse.
-        let best = ship.turrets[0], bestTurn = Infinity;
-        for (const turret of ship.turrets) {
+        // The turret that needs the least traverse, among those still working.
+        const working = ship.turrets.filter(turret => !turret.jammed);
+        let best = working[0] || ship.turrets[0], bestTurn = Infinity;
+        for (const turret of working.length ? working : ship.turrets) {
             const {yaw} = ship.aim(turret, target);
             const turn = Math.abs(((yaw - turret.yaw.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
             if (turn < bestTurn) {
@@ -273,6 +288,7 @@ export class Combat {
         const muzzle = turret.muzzles[0];
         const start = muzzle.getWorldPosition(new THREE.Vector3());
         const dir = new THREE.Vector3(1, 0, 0).transformDirection(muzzle.matrixWorld);
+        T.director.cueLaunch({at: start, dir, scale: 1.2});
         T.effects.muzzle(start, dir, .75);
         this.recoil(turret.barrels[0]);
         T.audio.play('cannon', start, .7);
@@ -291,6 +307,7 @@ export class Combat {
         for (let i = 0; i < rounds; i++) {
             const launcher = ship.launchers[(i + Math.floor(Math.random() * 2)) % ship.launchers.length];
             const start = ship.body.localToWorld(launcher.clone().add(new THREE.Vector3((Math.random() - .5) * .08, 0, (Math.random() - .5) * .08)));
+            if (i === 0) T.director.cueLaunch({at: start, dir: UP, vertical: true, scale: 1.6});
             T.effects.vlsLaunch(start, ship.type === 'Cruiser' ? 1.1 : 1);
             T.audio.play(ship.type === 'Cruiser' ? 'missile' : 'missileLight', start, 1.3);
             T.post.flash(.04);
@@ -333,6 +350,7 @@ export class Combat {
         await T.wait(.35);
         T.effects.splash(start.clone().setY(0), .6, {sound: false});
         T.effects.steam(start, 1);
+        T.director.cueLaunch({at: start.clone().setY(.04), dir: UP, vertical: true, scale: 1.4});
         T.effects.vlsLaunch(start.clone().setY(.02), .7);
         T.audio.play('subMissile', start, 1.1);
         await this.missileFlight(start, impact);
@@ -365,6 +383,7 @@ export class Combat {
         jet.traverse(o => { if (o.isMesh) o.castShadow = true; });
         T.effects.steam(deckStart, .7);
         const forward = deckEnd.clone().sub(deckStart).normalize();
+        T.director.cueLaunch({at: deckStart.clone().add(new THREE.Vector3(0, .04, 0)), dir: forward});
         const toward = impact.clone().sub(deckEnd).setY(0).normalize();
         const side = new THREE.Vector3().crossVectors(toward, UP).multiplyScalar(Math.random() < .5 ? 1 : -1);
         const outward = Math.sign(impact.x) || 1;

@@ -305,13 +305,14 @@ export function railGeometry(spec, s0, s1, height = .016) {
 
 // Paint wear, rust streaks, waterline bands, the team's hull stripe and number, and scorch marks that
 // spread (and glow) where the ship has been hit. All in the ship's own frame, so the marks ride with it.
-function weathering(material, shared, ship, {hull = false, rust = .5, ember = true} = {}) {
+function weathering(material, shared, ship, {hull = false, rust = .5, ember = true, plates = false} = {}) {
     material.onBeforeCompile = (shader) => {
         Object.assign(shader.uniforms, {
             uGrime: shared.grime,
             uTime: shared.time,
             uShipInv: ship.inverse,
             uBurn: ship.burn,
+            uHoles: ship.holes,
             uRust: {value: rust},
             uTeamColor: ship.teamColor,
             uNumberMap: ship.numberMap,
@@ -327,7 +328,8 @@ function weathering(material, shared, ship, {hull = false, rust = .5, ember = tr
                 vShipNormal = normalize(mat3(toShip) * objectNormal);`);
         shader.fragmentShader = shader.fragmentShader
             .replace('#include <common>', `#include <common>
-                uniform sampler2D uGrime; uniform float uTime; uniform vec4 uBurn[6]; uniform float uRust;
+                uniform sampler2D uGrime; uniform float uTime; uniform vec4 uBurn[6]; uniform vec4 uHoles[8]; uniform float uRust;
+                float shipBent;
                 float shipHash(vec3 p) { p = fract(p * .1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
                 float shipNoise(vec3 p) {
                     vec3 i = floor(p), f = fract(p);
@@ -345,6 +347,31 @@ function weathering(material, shared, ship, {hull = false, rust = .5, ember = tr
                 float vertical = 1. - an.y;
                 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.3, .19, .11), smoothstep(.6, .9, shipGrime.g) * vertical * uRust * .55);
                 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.24, .15, .09), shipGrime.a * uRust * .22);
+                // Steel plating: strakes about 2.5 m high with butts every 9 m on the hull, 3 m panels on the
+                // superstructure. Seams are thin dark lines (antialiased, and faded out once smaller than a pixel);
+                // each plate is a slightly different shade, as plates take paint and weather differently.
+                ${plates ? `{
+                    vec2 plateSize = ${hull ? 'vec2(.12, .033)' : 'vec2(.07, .045)'};
+                    vec2 along = vec2(abs(vShipNormal.z) > abs(vShipNormal.x) ? vShipPos.x : vShipPos.z, vShipPos.y);
+                    if (an.y > .6) along = vShipPos.xz;
+                    vec2 cell = along / plateSize;
+                    vec2 f = abs(fract(cell) - .5) * plateSize;
+                    vec2 halfPlate = plateSize * .5;
+                    vec2 px = max(fwidth(along) * .7, vec2(.0004));
+                    vec2 seam = smoothstep(halfPlate - .0009 - px, halfPlate - .0002, f);
+                    float visible = clamp(.0011 / max(px.x, px.y), 0., 1.);
+                    float lines = max(seam.x, seam.y) * visible;
+                    diffuseColor.rgb *= 1. - lines * ${hull ? '.3' : '.16'};
+                    diffuseColor.rgb *= .965 + .07 * shipHash(vec3(floor(cell), 3.1));
+                    // Rust weeping from seams, scuppers and fittings down the vertical faces, in long streaks.
+                    float streak = texture2D(uGrime, vec2(along.x * 7.1, along.y * .55 - vShipPos.z * 3.)).g;
+                    float source = smoothstep(.62, .82, shipNoise(vec3(along.x * 31., 0., vShipPos.z * 5.)));
+                    float weep = smoothstep(.5, .9, streak) * source * vertical * uRust;
+                    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.33, .17, .08), weep * .5);
+                    // Paint worn back to grey primer along sharp edges and seams.
+                    float edge = clamp(length(fwidth(vShipNormal)) * 1.6, 0., 1.) * visible;
+                    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.14 + .02, edge * .45);
+                }` : ''}
                 ${hull ? `
                 float wy = vShipPos.y;
                 if (wy < -.003) diffuseColor.rgb = vec3(.30, .07, .055) * mix(.75, 1.1, shipGrime.r);
@@ -370,7 +397,22 @@ function weathering(material, shared, ship, {hull = false, rust = .5, ember = tr
                     shipBurn = max(shipBurn, (1. - smoothstep(b.z * .3, b.z, d)) * b.w);
                 }
                 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.016, .014, .013), shipBurn * .93);
+                // Shell and warhead holes: a jagged opening (through the hull, the dark inside shows), ringed by
+                // steel bent outward and stripped of paint.
+                shipBent = 0.;
+                float shipHole = 0.;
+                for (int i = 0; i < 8; i++) {
+                    vec4 h = uHoles[i];
+                    if (h.w <= 0.) continue;
+                    float d = length(vShipPos - h.xyz) / h.w + (shipNoise(vShipPos * 160.) - .5) * .55 + (shipNoise(vShipPos * 47.) - .5) * .35;
+                    shipHole = max(shipHole, 1. - smoothstep(.36, .42, d));
+                    shipBent = max(shipBent, 1. - smoothstep(.4, 1.05, d));
+                }
+                ${hull ? 'if (shipHole > .5 && gl_FrontFacing) discard;' : ''}
+                diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.02, .018, .016), max(shipHole, shipBent * .7));
                 if (!gl_FrontFacing) diffuseColor.rgb = vec3(.025, .02, .018);`)
+            .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+                if (shipBent > 0.) normal = normalize(normal + (vec3(shipNoise(vShipPos * 210.), shipNoise(vShipPos * 210. + 7.), shipNoise(vShipPos * 210. + 3.)) - .5) * shipBent * 1.6);`)
             .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
                 roughnessFactor = clamp(roughnessFactor + (shipGrime.r - .5) * .22 + shipBurn * .35, .05, 1.);`)
             .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
@@ -378,7 +420,7 @@ function weathering(material, shared, ship, {hull = false, rust = .5, ember = tr
                 float emberPulse = .6 + .4 * sin(uTime * 3.1 + shipNoise(vShipPos * 9.) * 18.);
                 totalEmissiveRadiance += vec3(1., .3, .05) * pow(shipBurn, 3.) * smoothstep(.56, .8, emberField) * emberPulse * 2.;` : ''}`);
     };
-    material.customProgramCacheKey = () => (hull ? 'ship-hull' : 'ship-paint') + (ember ? '-e' : '');
+    material.customProgramCacheKey = () => (hull ? 'ship-hull' : 'ship-paint') + (ember ? '-e' : '') + (plates ? '-p' : '');
     return material;
 }
 
@@ -390,8 +432,8 @@ export function sharedShipResources(grime) {
 export function shipMaterials(shared, ship, textures) {
     const paint = (color, roughness = .62, metalness = .04, options = {}) => new THREE.MeshStandardMaterial({color, roughness, metalness, envMapIntensity: .7, ...options});
     const mats = {
-        hull: weathering(paint(ship.paint, .6, .05, {side: THREE.DoubleSide}), shared, ship, {hull: true, rust: .65}),
-        steel: weathering(paint(ship.superstructure, .62, .05), shared, ship, {rust: .4}),
+        hull: weathering(paint(ship.paint, .6, .05, {side: THREE.DoubleSide}), shared, ship, {hull: true, rust: .65, plates: true}),
+        steel: weathering(paint(ship.superstructure, .62, .05), shared, ship, {rust: .4, plates: true}),
         deck: weathering(paint(0xffffff, .85, .02, {map: textures.deck}), shared, ship, {rust: .1}),
         dark: weathering(paint(0x2c2f33, .52, .35), shared, ship, {rust: .2}),
         black: paint(0x0d0e10, .7, .1),
@@ -405,6 +447,13 @@ export function shipMaterials(shared, ship, textures) {
         rail: new THREE.MeshStandardMaterial({color: 0xd0d2cf, roughness: .5, metalness: .4, map: textures.rail, alphaTest: .5, side: THREE.DoubleSide}),
         team: paint(ship.teamColor.value, .45, .1),
         yellow: paint(0xd8a21c, .55, .1),
+        // Flight-deck jerseys (by job: yellow handlers, purple fuel, green catapult, red ordnance, brown plane
+        // captains, white safety) and blue coveralls.
+        crewPurple: paint(0x5b3b8c, .8, 0),
+        crewGreen: paint(0x3f7d3a, .8, 0),
+        crewRed: paint(0xa8261d, .8, 0),
+        crewBrown: paint(0x6b4a2c, .8, 0),
+        crewBlue: paint(0x2b3f63, .8, 0),
         lightRed: new THREE.MeshBasicMaterial({color: new THREE.Color(1, .08, .05).multiplyScalar(6)}),
         lightGreen: new THREE.MeshBasicMaterial({color: new THREE.Color(.1, 1, .3).multiplyScalar(5)}),
         lightWhite: new THREE.MeshBasicMaterial({color: new THREE.Color(1, .95, .8).multiplyScalar(7)}),

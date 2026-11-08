@@ -5,6 +5,8 @@ const $ = (id) => document.getElementById(id);
 const PLAYERS = ['gpt', 'claude'];
 const SHIPS = {Carrier: 5, Battleship: 4, Cruiser: 3, Submarine: 3, Destroyer: 2};
 const names = {gpt: 'GPT', claude: 'Claude'};
+// What the legends under the boards show, kept so a theater that loads late can catch up.
+const legends = {gpt: null, claude: null};
 const settingsKey = 'battleship-settings';
 let preferences = {};
 try { preferences = JSON.parse(localStorage.getItem(settingsKey)) || {}; } catch {}
@@ -87,7 +89,6 @@ async function loadTheater() {
         theater.setMuted(Boolean(preferences.muted));
         applyCamera(preferences.camera || 'cinematic');
         // A drag on the battle hands the camera to the viewer.
-        theater.onFrame = placeBoardTags;
         theater.onCameraModeChange = (camera) => {
             if (!document.body.classList.contains('is-match')) return;
             applyCamera(camera);
@@ -95,6 +96,7 @@ async function loadTheater() {
         };
         updateSafeArea();
         showNames();
+        showLegends();
         if (!state?.started) await theater.setAttract(true);
         else await theater.syncState(state);
     } catch (error) {
@@ -118,39 +120,12 @@ function updateSafeArea() {
         const board = document.querySelector('.scoreboard').getBoundingClientRect();
         const commentary = document.querySelector('.match-center').getBoundingClientRect();
         insets.top = board.bottom - 6;
-        // Frame the fleets above the commentary, leaving room under the boards for their floating tags.
-        insets.bottom = Math.min(Math.max(0, height - commentary.top) + (width > 760 ? 70 : 34), height * .4);
+        // Frame the fleets (and the legends under them) above the commentary.
+        insets.bottom = Math.min(Math.max(0, height - commentary.top) + 8, height * .4);
     }
     theater.setSafeArea(insets);
 }
 
-// The tags float on the water under each board: the theater says where that is on screen after every frame.
-const TAG_REFERENCE = 62;   // pixels per grid square in the default tactical view
-function placeBoardTags() {
-    const inMatch = document.body.classList.contains('is-match');
-    for (const key of PLAYERS) {
-        const tag = $(key + '-panel');
-        const anchor = inMatch && theater ? theater.boardAnchor(key) : null;
-        if (!anchor) {
-            tag.style.setProperty('--tag-opacity', '0');
-            continue;
-        }
-        const scale = Math.min(1.2, Math.max(.72, anchor.unit / TAG_REFERENCE));
-        // Fade out when the board is far off, filling the screen, or its edge leaves the view.
-        const near = 1 - Math.min(1, Math.max(0, (anchor.unit - 180) / 160));
-        const far = Math.min(1, Math.max(0, (anchor.unit - 14) / 14));
-        const inside = Math.min(1, Math.max(0, (innerHeight - 30 - anchor.y) / 60)) * Math.min(1, Math.max(0, Math.min(anchor.x, innerWidth - anchor.x) / 80));
-        const width = Math.min(620, Math.max(250, anchor.unit * 9.6 / scale), (innerWidth / 2 - 24) / scale);
-        // Keep the whole tag on screen when the board's edge runs near the side of the window.
-        const half = width * scale / 2 + 12;
-        const x = Math.min(innerWidth - half, Math.max(half, anchor.x));
-        tag.style.setProperty('--tag-x', x.toFixed(1) + 'px');
-        tag.style.setProperty('--tag-y', (anchor.y + 6).toFixed(1) + 'px');
-        tag.style.setProperty('--tag-scale', scale.toFixed(3));
-        tag.style.setProperty('--tag-width', width.toFixed(0) + 'px');
-        tag.style.setProperty('--tag-opacity', (near * far * inside).toFixed(3));
-    }
-}
 addEventListener('resize', () => requestAnimationFrame(updateSafeArea));
 
 function setScreen(screen) {
@@ -162,6 +137,7 @@ function setScreen(screen) {
     $('match-view').classList.toggle('hidden', screen !== 'match');
     requestAnimationFrame(updateSafeArea);
     showNames();
+    showLegends();
 }
 
 function applyCamera(camera) {
@@ -207,7 +183,7 @@ function clearThinking() {
     for (const model of PLAYERS) {
         $(model + '-thinking').classList.add('hidden');
         $(model + '-idle').classList.remove('hidden');
-        $(model + '-panel').classList.remove('is-thinking');
+        document.querySelector('.' + model + '-side').classList.remove('is-thinking');
     }
 }
 
@@ -216,7 +192,7 @@ function showThinking(model, label) {
     $(model + '-thinking-label').textContent = label;
     $(model + '-thinking').classList.remove('hidden');
     $(model + '-idle').classList.add('hidden');
-    $(model + '-panel').classList.add('is-thinking');
+    document.querySelector('.' + model + '-side').classList.add('is-thinking');
     $(model + '-timer').textContent = '0.0s';
     const start = performance.now();
     timer = setInterval(() => {
@@ -243,17 +219,13 @@ function renderPlayers(current) {
             }
             scores[key] = stats.sunk;
         }
-        // Own fleet: the legend under the board, and pips on the scoreboard.
+        // Own fleet: the legend fixed on the water under the board, and pips on the scoreboard.
         const fleet = new Map(player.fleet.map(ship => [ship.name, ship]));
-        let afloat = 0;
-        for (const icon of $(key + '-fleet').children) {
-            const ship = fleet.get(icon.dataset.ship);
-            const hits = ship ? ship.hits.length : 0;
-            icon.classList.toggle('sunk', Boolean(ship?.sunk));
-            icon.classList.toggle('damaged', Boolean(ship && !ship.sunk && hits));
-            icon.setAttribute('aria-label', `${icon.dataset.ship}: ${ship?.sunk ? 'sunk' : hits ? `${hits} of ${SHIPS[icon.dataset.ship]} hit` : 'afloat'}`);
-            if (ship && !ship.sunk) afloat++;
-        }
+        const afloat = player.fleet.filter(ship => !ship.sunk).length;
+        legends[key] = {
+            fleet: Object.keys(SHIPS).map(type => ({type, sunk: Boolean(fleet.get(type)?.sunk), damaged: Boolean(fleet.get(type)?.hits.length)})),
+            text: player.reasoning || 'No moves yet.',
+        };
         for (const pip of $(key + '-pips').children) {
             const ship = fleet.get(pip.dataset.ship);
             const size = SHIPS[pip.dataset.ship];
@@ -263,15 +235,21 @@ function renderPlayers(current) {
         }
         const deployed = player.fleet.length > 0;
         $(key + '-pips').setAttribute('aria-label', deployed ? `${afloat} of 5 ships afloat` : 'Fleet not deployed');
-        $(key + '-reasoning').textContent = player.reasoning || 'No moves yet.';
-        $(key + '-reasoning').title = player.reasoning || '';
         $(key + '-idle').textContent = current.game_over ? (current.winner === key ? 'Victorious' : 'Fleet destroyed')
             : current.phase === 'placement' ? (deployed ? 'Fleet deployed' : 'Preparing fleet')
             : current.current_player === key ? 'Up next' : `${afloat} ships afloat`;
     }
 }
 
+// The legends fixed on the water under each board, during a match only.
+function showLegends() {
+    if (!theater) return;
+    const inMatch = document.body.classList.contains('is-match');
+    for (const key of PLAYERS) theater.setLegend(key, inMatch ? legends[key] : null);
+}
+
 function renderScoreboard(current) {
+    showLegends();
     showNames();
     const crowned = current.game_over ? current.winner : null;
     for (const model of PLAYERS) document.querySelector('.' + model + '-side').classList.toggle('has-crown', crowned === model);

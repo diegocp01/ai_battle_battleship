@@ -165,8 +165,15 @@ void main() {
 
     // Reflection: the mirrored scene, nudged by the surface normal.
     vec4 projected = uTextureMatrix * vec4(vFlat.x, 0., vFlat.z, 1.);
-    vec2 reflectUv = projected.xy / projected.w + N.xz * (.045 + .035 * near);
-    vec3 reflection = texture2D(uReflection, reflectUv).rgb;
+    // The mirror image, nudged by the waves (gently: strong distortion breaks it into hard-edged shards) and
+    // softened by a small disc of taps, as a slightly rough sea blurs what it reflects.
+    vec2 reflectUv = projected.xy / projected.w + N.xz * (.016 + .014 * near);
+    vec2 spread = vec2(.0025, .0035) * (.6 + clamp(length(N.xz) * 6., 0., 1.));
+    vec3 reflection = texture2D(uReflection, reflectUv).rgb * .36
+        + texture2D(uReflection, reflectUv + spread * vec2(1., .3)).rgb * .16
+        + texture2D(uReflection, reflectUv + spread * vec2(-.3, 1.)).rgb * .16
+        + texture2D(uReflection, reflectUv + spread * vec2(-1., -.3)).rgb * .16
+        + texture2D(uReflection, reflectUv + spread * vec2(.3, -1.)).rgb * .16;
 
     float cosTheta = clamp(dot(N, V), 0., 1.);
     float fresnel = .02 + .98 * pow(1. - cosTheta, 5.);
@@ -279,7 +286,7 @@ void main() {
         float coreWidth = .02;
         float w = max(coreWidth, px * .8);
         float core = (1. - smoothstep(w - px * .6, w + px * .6, d)) * min(1., coreWidth / w * 1.4);
-        float halo = exp(-d / .14) * .75 + exp(-d / .6) * .2;
+        float halo = exp(-d / .045) * .8 + exp(-d / .16) * .1;
         vec3 neon = mix(gridColor, vec3(1.), .14);
         color += (neon * core * 2.6 + gridColor * gridColor * halo * facet * 1.25 * (inside ? 1. : .8)) * uGridOpacity * distanceFade;
         if (inside) {
@@ -376,6 +383,7 @@ export class Ocean {
         this.reflectionTarget.texture.generateMipmaps = false;
         this.mirrorCamera = new THREE.PerspectiveCamera();
         this.mirrorCamera.layers.set(0);
+        this.mirrorCamera.layers.enable(3);   // fire, smoke and spray reflect too
         this.textureMatrix = new THREE.Matrix4();
         this.gridData = new Uint8Array(20 * 10 * 4);
         this.gridState = new THREE.DataTexture(this.gridData, 20, 10, THREE.RGBAFormat);
@@ -393,8 +401,8 @@ export class Ocean {
             uReflection: {value: this.reflectionTarget.texture},
             uGridState: {value: this.gridState},
             uTextureMatrix: {value: this.textureMatrix},
-            uSunDir: {value: env.sun.clone()},
-            uSunColor: {value: env.sunColor.clone()},
+            uSunDir: {value: env.sun},
+            uSunColor: {value: env.sunColor},
             uDeep: {value: new THREE.Color(.004, .02, .068)},
             uScatter: {value: new THREE.Color(.0, .11, .22)},
             uSkyLight: {value: new THREE.Color(.45, .55, .7)},
@@ -422,7 +430,7 @@ export class Ocean {
     }
 
     setSize(width, height) {
-        this.reflectionTarget.setSize(Math.max(2, Math.round(width * .42)), Math.max(2, Math.round(height * .42)));
+        this.reflectionTarget.setSize(Math.max(2, Math.round(width * .7)), Math.max(2, Math.round(height * .7)));
     }
 
     // Height of the sea surface at (x, z), matching the vertex shader.

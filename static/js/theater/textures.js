@@ -534,6 +534,77 @@ export function labelTexture(text, {color = '#ffffff', size = 128, font = 600, s
     return canvasTexture(element, {anisotropy: 4});
 }
 
+// The legend under a board: one line of ship silhouettes (team colour afloat, a red dot when damaged, dimmed
+// when sunk) and the model's latest reasoning beneath, white over a soft dark glow. Drawn into a canvas that
+// becomes a label fixed on the water.
+const SHIP_ICONS = {
+    Carrier: [45, 'M1 6.5H44M3 6.5 6 10.5H38L42 6.5M28 6.5V3H32.5L33.5 6.5'],
+    Battleship: [36, 'M1.5 7H34.5M2 7 4.5 10.5H31L34.5 7M14 7V4.5H17.5V2H19V4.5H22.5V7M6.5 7V5.5H10.5V7M25.5 7V5.5H29.5V7'],
+    Cruiser: [27, 'M1.5 7H25.5M2 7 4 10.5H23L25.5 7M9 7V4.5H11.5V2H12.5V4.5H15.5V7M18 7V5.5H20.5V7'],
+    Submarine: [27, 'M2.5 8.5C2.5 7 4.5 6.2 7.5 6.2H21.5C24 6.2 25.5 7.2 25.5 8.5S24 10.8 21.5 10.8H7.5C4.5 10.8 2.5 10 2.5 8.5ZM9.5 6.2V3.2H13.5L14.5 6.2'],
+    Destroyer: [18, 'M1.5 7H16.5M2 7 3.5 10.5H14.5L16.5 7M6 7V4.5H8.5V2H9.5V4.5H12V7'],
+};
+export const LEGEND_SIZE = [2048, 400];
+
+export function drawLegend(context, {fleet = [], text = '', color = '#ffffff'}) {
+    const [width, height] = LEGEND_SIZE;
+    context.clearRect(0, 0, width, height);
+    context.save();
+    context.shadowColor = 'rgba(0, 8, 24, .85)';
+    context.shadowBlur = 14;
+    // Ship silhouettes, centred.
+    const scale = 7.2, gap = 64;
+    const total = fleet.reduce((sum, ship) => sum + (SHIP_ICONS[ship.type]?.[0] || 20) * scale, 0) + gap * Math.max(0, fleet.length - 1);
+    let x = (width - total) / 2;
+    for (const ship of fleet) {
+        const [w, path] = SHIP_ICONS[ship.type] || SHIP_ICONS.Destroyer;
+        context.save();
+        context.translate(x, 6);
+        context.scale(scale, scale);
+        context.lineWidth = 1.5;
+        context.lineJoin = context.lineCap = 'round';
+        context.strokeStyle = ship.sunk ? 'rgba(255,255,255,.3)' : color;
+        context.stroke(new Path2D(path));
+        context.restore();
+        if (ship.damaged && !ship.sunk) {
+            context.fillStyle = '#ff5a3c';
+            context.beginPath();
+            context.arc(x + w * scale - 10, 10, 12, 0, Math.PI * 2);
+            context.fill();
+        }
+        x += w * scale + gap;
+    }
+    // The reasoning, wrapped to three lines.
+    context.font = '500 54px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif';
+    context.fillStyle = 'rgba(244, 247, 252, .96)';
+    context.textAlign = 'center';
+    context.textBaseline = 'top';
+    const words = String(text || '').split(/\s+/).filter(Boolean);
+    const lines = [];
+    let line = '';
+    for (const word of words) {
+        const next = line ? line + ' ' + word : word;
+        if (context.measureText(next).width > width - 80 && line) {
+            lines.push(line);
+            line = word;
+            if (lines.length === 3) break;
+        } else line = next;
+    }
+    if (lines.length < 3 && line) lines.push(line);
+    if (lines.length === 3 && words.join(' ').length > lines.join(' ').length) {
+        let last = lines[2];
+        while (context.measureText(last + '…').width > width - 80 && last.length) last = last.slice(0, -1);
+        lines[2] = last.trimEnd() + '…';
+    }
+    lines.forEach((l, i) => context.fillText(l, width / 2, 130 + i * 70));
+    context.restore();
+}
+
+export function legendTexture() {
+    const [element] = canvas(...LEGEND_SIZE);
+    return canvasTexture(element, {anisotropy: 8});
+}
+
 // A wide word mark used above each fleet: team name in team color over a soft dark glow.
 export function bannerTexture(text, color) {
     const [element, context] = canvas(1024, 192);
