@@ -128,7 +128,7 @@ export class AirTraffic {
             const jet = fighter.model(1.15);
             const decals = fighterDecals(team);
             const paint = fighter.color ? new THREE.MeshStandardMaterial({color: fighter.color, roughness: .5, metalness: .12}) : this.materials.gray;
-            const materials = {gray: paint, glass: this.materials.glass, dark: this.materials.dark, glow: decals.fighterGlow, prompt: decals.fighterPrompt, logo: decals.fighterLogo};
+            const materials = {gray: paint, accent: decals.fighterAccent, glass: this.materials.glass, dark: this.materials.dark, glow: decals.fighterGlow, badge: decals.fighterBadge, logo: decals.fighterLogo};
             this.jetParts[team] = Object.entries(materials).filter(([part]) => jet[part]?.length).map(([part, material]) => ({geometry: merge(jet[part].map(g => g.clone())), material}));
         }
         this.flights = [];

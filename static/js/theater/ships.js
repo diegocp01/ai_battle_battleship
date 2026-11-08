@@ -5,22 +5,19 @@ import {
 } from './shipkit.js';
 import { steelDeckTexture, teakDeckTexture, flightDeckTexture, hullNumberTexture } from './textures.js';
 import { sailor, crewGroup, windowRow, windowsAround, portholes, deckFittings, vents, raftRack, whips, roofRail, outlineRail, anchorGear, canisterLauncher, torpedoTubes, latticeMast, searchlight, ewArrays, stealthJet, hawkeye, seahawk, tug } from './detail.js';
-// Each fleet's fighter, after the references: the Codex fleet's deep-blue stealth fighters with glowing cyan
-// edges, a lit >_ on the intakes and the logo on the tails; the Claude fleet's clay-orange stealth fighters.
+// Each fleet's fighter, after the references: stealth fighters in the fleet's paint, with its glow color, the
+// badge on its intakes (a glowing >_ for Codex, the mascot for Claude) and its logo on the tails.
 export const FIGHTERS = {
-    gpt: {model: (s) => stealthJet(s, 'codex'), color: 0x283075, logo: '/static/img/logo-chatgpt.png'},
-    claude: {model: (s) => stealthJet(s, 'claude'), color: 0xd36b4f},
+    gpt: {model: (s) => stealthJet(s, 'codex'), color: 0x283075, glow: [.3, .9, 3.4], badge: 'prompt', logo: '/static/img/logo-chatgpt.png'},
+    claude: {model: (s) => stealthJet(s, 'claude'), color: 0xd0623e, glow: [3.4, 1.05, .25], badge: 'mascot', logo: '/static/img/logo-claude.png'},
 };
 
-// The glowing strips, the lit prompt and the tail logo of a fleet's fighters (new materials each call; the
-// textures are shared).
-const decalTextures = {};
-export function fighterDecals(team) {
-    const logoUrl = FIGHTERS[team]?.logo;
-    if (!decalTextures.prompt) {
-        const element = document.createElement('canvas');
-        element.width = 256; element.height = 128;
-        const c = element.getContext('2d');
+// The intake badges, drawn once.
+function badgeTexture(kind) {
+    const element = document.createElement('canvas');
+    element.width = 256; element.height = 128;
+    const c = element.getContext('2d');
+    if (kind === 'prompt') {
         c.font = 'bold 92px "SF Mono", Menlo, Consolas, monospace';
         c.textAlign = 'center';
         c.textBaseline = 'middle';
@@ -28,23 +25,50 @@ export function fighterDecals(team) {
         c.shadowColor = 'rgba(60, 170, 255, 1)';
         c.shadowBlur = 18;
         for (let i = 0; i < 2; i++) c.fillText('>_', 128, 64);
-        decalTextures.prompt = new THREE.CanvasTexture(element);
-        decalTextures.prompt.colorSpace = THREE.SRGBColorSpace;
+    } else {
+        // The Claude mascot as a pixel badge: a block body with square eyes, stubby arms and four legs.
+        const u = 9, x0 = 128 - 5 * u, y0 = 64 - 5.5 * u;
+        c.fillStyle = '#f6dcd2';
+        c.fillRect(x0 + u, y0, 8 * u, 6 * u);
+        c.fillRect(x0, y0 + 2 * u, u, 2 * u);
+        c.fillRect(x0 + 9 * u, y0 + 2 * u, u, 2 * u);
+        for (const x of [1.6, 3, 6, 7.4]) c.fillRect(x0 + x * u, y0 + 6 * u, u, 3 * u);
+        c.fillStyle = '#2b1c18';
+        c.fillRect(x0 + 2.6 * u, y0 + 1.6 * u, 1.1 * u, 1.1 * u);
+        c.fillRect(x0 + 6.3 * u, y0 + 1.6 * u, 1.1 * u, 1.1 * u);
     }
-    if (logoUrl && !decalTextures[logoUrl]) {
-        decalTextures[logoUrl] = new THREE.TextureLoader().load(logoUrl);
-        decalTextures[logoUrl].colorSpace = THREE.SRGBColorSpace;
-        decalTextures[logoUrl].anisotropy = 8;
+    const texture = new THREE.CanvasTexture(element);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 8;
+    return texture;
+}
+
+// The trim, the glow, the intake badge and the tail logo of a fleet's fighters (new materials each call; the
+// textures are shared).
+const decalTextures = {};
+export function fighterDecals(team) {
+    const fighter = FIGHTERS[team] || FIGHTERS.gpt;
+    const badge = fighter.badge;
+    decalTextures[badge] = decalTextures[badge] || badgeTexture(badge);
+    if (fighter.logo && !decalTextures[fighter.logo]) {
+        decalTextures[fighter.logo] = new THREE.TextureLoader().load(fighter.logo);
+        decalTextures[fighter.logo].colorSpace = THREE.SRGBColorSpace;
+        decalTextures[fighter.logo].anisotropy = 8;
     }
+    const decal = {transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, side: THREE.DoubleSide};
     return {
-        fighterGlow: new THREE.MeshBasicMaterial({color: new THREE.Color(.3, .9, 3.4), toneMapped: false}),
-        fighterPrompt: new THREE.MeshBasicMaterial({map: decalTextures.prompt, transparent: true, depthWrite: false, toneMapped: false, color: new THREE.Color(2.6, 2.6, 2.6), polygonOffset: true, polygonOffsetFactor: -2, side: THREE.DoubleSide}),
-        fighterLogo: new THREE.MeshStandardMaterial({map: logoUrl ? decalTextures[logoUrl] : null, transparent: true, alphaTest: .25, depthWrite: false, roughness: .45, metalness: .1, polygonOffset: true, polygonOffsetFactor: -2, visible: Boolean(logoUrl)}),
+        fighterAccent: new THREE.MeshStandardMaterial({color: 0xe4e2dc, roughness: .48, metalness: .12}),
+        fighterGlow: new THREE.MeshBasicMaterial({color: new THREE.Color(...fighter.glow), toneMapped: false}),
+        // The >_ glows; the mascot is painted on and takes the light like the rest of the jet.
+        fighterBadge: badge === 'prompt'
+            ? new THREE.MeshBasicMaterial({map: decalTextures[badge], toneMapped: false, color: new THREE.Color(2.6, 2.6, 2.6), ...decal})
+            : new THREE.MeshStandardMaterial({map: decalTextures[badge], alphaTest: .3, roughness: .5, metalness: .1, ...decal}),
+        fighterLogo: new THREE.MeshStandardMaterial({map: fighter.logo ? decalTextures[fighter.logo] : null, alphaTest: .25, roughness: .45, metalness: .1, visible: Boolean(fighter.logo), ...decal}),
     };
 }
 
 // Every part of a fighter as meshes, by material (paint, glass, dark, and any glow, prompt and logo).
-const FIGHTER_PARTS = {gray: 'fighter', glass: 'glass', dark: 'dark', glow: 'fighterGlow', prompt: 'fighterPrompt', logo: 'fighterLogo'};
+const FIGHTER_PARTS = {gray: 'fighter', accent: 'fighterAccent', glass: 'glass', dark: 'dark', glow: 'fighterGlow', badge: 'fighterBadge', logo: 'fighterLogo'};
 
 // The five ships of the classic game, at their classic sizes (5, 4, 3, 3 and 2 squares), each modeled after a
 // real class and built at its real dimensions: a Ford-class carrier, an Iowa-class battleship, a
