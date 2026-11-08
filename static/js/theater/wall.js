@@ -4,8 +4,14 @@ import { GLSL_NOISE } from './textures.js';
 
 // The barrier between the two fleets, so neither side can see the other's ships: a long, thin wall of
 // precast concrete running from behind the camera to the horizon, with a boom of yellow floats along its
-// waterline on both sides. The concrete is shaded in world space: soft mottling, fine aggregate up close,
-// faint vertical panel joints, rain streaks, and a dark wet band where the swell washes against it.
+// waterline on both sides. At 214 m tall it is built like a dam face and shaded that way, in world space:
+//  - vertical contraction joints every 15 m, and the formwork lifts every 2.6 m showing as faint horizontal bands,
+//    each pour a slightly different shade;
+//  - long, thin streaks where water has run down the face, darkest from the top; up close, bug holes, thin rust
+//    runs and the aggregate in the surface;
+//  - white efflorescence leaching from the joints, rain streaks under the coping, the lower wall darker from
+//    spray, and a wet, weed-stained splash zone with a dried salt line above it.
+// Lines too fine for the pixel fade out instead of shimmering. One unit is 75 m.
 export const WALL = {
     zMin: -95,            // runs to the horizon…
     zMax: 48,             // …and past the camera
@@ -23,6 +29,13 @@ ${GLSL_NOISE}
 varying vec3 vWallPos;
 varying vec3 vWallNormal;
 float wallHeight;
+float wallHash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+// A line every \`period\` along a coordinate, \`width\` wide, antialiased and fading out when sub-pixel.
+float wallLines(float coord, float period, float width) {
+    float d = (.5 - abs(fract(coord / period) - .5)) * period;
+    float aa = max(fwidth(coord) * .75, 1e-6);
+    return (1. - smoothstep(width - aa, width + aa, d)) * min(1., width / aa);
+}
 vec3 wallTriplanar(vec3 p, vec3 n) {
     vec3 a = abs(n); a /= (a.x + a.y + a.z + 1e-4);
     vec2 px = p.zy, py = p.xz, pz = p.xy;
@@ -34,7 +47,8 @@ vec3 wallTriplanar(vec3 p, vec3 n) {
 `;
 
 function concreteMaterial() {
-    const material = new THREE.MeshStandardMaterial({color: 0x7b7975, roughness: .85, metalness: 0, envMapIntensity: .55});
+    // Weathered concrete: a warm light grey, matte, hardly mirroring the sky.
+    const material = new THREE.MeshStandardMaterial({color: 0xa49c8f, roughness: .95, metalness: 0, envMapIntensity: .16});
     material.onBeforeCompile = (shader) => {
         shader.vertexShader = shader.vertexShader
             .replace('#include <common>', '#include <common>\nvarying vec3 vWallPos;\nvarying vec3 vWallNormal;')
@@ -49,20 +63,38 @@ function concreteMaterial() {
                 float near = 1. - smoothstep(2., 9., distance(cameraPosition, vWallPos));
                 float blotch = detail.x + .5, grain = mix(.5, detail.y + .5, near), rain = detail.z + .5;
                 float vertical = 1. - abs(wn.y);
-                // Precast panels 1.6 long: a faint vertical joint between each.
-                float joint = abs(fract(vWallPos.z / 1.6) - .5) * 1.6;
-                float seam = smoothstep(.785, .8, joint) * vertical * mix(.6, 1., near);
-                float bugHoles = smoothstep(.75, .8, fbm(vWallPos.zy * 29., vec2(1e4), 3) + .5) * near;
-                wallHeight = (grain * .45 - bugHoles * .45) * near - seam * .6 + blotch * .1;
-                vec3 concrete = diffuseColor.rgb * mix(.86, 1.05, blotch) * mix(.95, 1.03, grain);
-                concrete *= 1. - seam * .28 - bugHoles * .18;
-                // Rain streaks, strongest under the coping.
+                float along = vWallPos.z, up = vWallPos.y;
+                // Contraction joints every 15 m, faint, fading with distance so the long wall never reads as
+                // corrugated. (The formwork lifts show only as the shading of each pour below, not as lines.)
+                float joint = wallLines(along, .2, .0022) * vertical * (1. - smoothstep(5., 16., distance(cameraPosition, vWallPos)) * .75);
+                // Each lift a slightly different shade that drifts slowly along the wall (horizontal bands, not
+                // tiles), and each bay between joints its own faint cast; faded out where they are too small to see.
+                vec2 pour = vec2(floor(along / .2), floor(up / .035));
+                float liftsVisible = 1. - smoothstep(.15, .5, fwidth(up) / .035);
+                float baysVisible = 1. - smoothstep(.15, .5, fwidth(along) / .2);
+                float pourTone = mix(1., mix(.955, 1.035, fbm(vec2(along * 1.3, pour.y * 3.7), vec2(1e4), 2) + .5), liftsVisible);
+                float bayTone = mix(1., mix(.97, 1.03, wallHash(vec2(pour.x, 7.))), baysVisible);
+                float bugHoles = smoothstep(.8, .86, fbm(vWallPos.zy * 31., vec2(1e4), 3) + .5) * near;
+                // Rust weeping from the odd embedded steel, in long thin runs (up close only).
+                float rust = smoothstep(.78, .95, fbm(vec2(along * 40., up * 1.6), vec2(1e4), 3) + .5) * near * vertical;
+                wallHeight = (grain * .25 - bugHoles * .35) * near - joint * .3 + blotch * .06;
+                vec3 concrete = diffuseColor.rgb * pourTone * bayTone * mix(.9, 1.04, blotch) * mix(.95, 1.03, grain);
+                concrete *= 1. - joint * .13 - bugHoles * .16;
+                // Long, thin streaks where water has run down the face for years, darkest from the top.
+                float streak = smoothstep(.5, .85, fbm(vec2(along * 55., up * .9), vec2(1e4), 3) + .5);
+                concrete *= 1. - streak * vertical * mix(.05, .16, smoothstep(.8, ${WALL.height.toFixed(2)}, up));
+                concrete = mix(concrete, concrete * vec3(.8, .62, .48), rust * .22);
+                // Efflorescence: white salts leached out of the joints and lift lines, running down the face.
+                float leach = smoothstep(.55, .9, rain) * (1. - smoothstep(.0, .5, abs(fract(along / .2) - .5) * 2. - .8));
+                concrete = mix(concrete, vec3(.86, .85, .8), leach * vertical * .16);
+                // Rain streaks, strongest under the coping; the lower wall darker from spray and age.
                 float underCap = smoothstep(${(WALL.height - 1.6).toFixed(2)}, ${WALL.height.toFixed(2)}, vWallPos.y);
-                concrete *= 1. - smoothstep(.45, .85, rain) * vertical * (.14 + underCap * .16);
+                concrete *= 1. - smoothstep(.4, .85, rain) * vertical * (.16 + underCap * .2);
+                concrete *= mix(.8, 1., smoothstep(.25, 1.7, up));
                 // The splash zone: wet and dark, weed-stained, with a dried salt line above it.
                 float splash = 1. - smoothstep(.1, .5, vWallPos.y + (grain - .5) * .16 + sin(vWallPos.z * 2.7) * .04);
                 concrete = mix(concrete, concrete * vec3(.4, .43, .38), splash);
-                concrete = mix(concrete, vec3(.15, .19, .12), splash * smoothstep(.45, .75, blotch) * .5);
+                concrete = mix(concrete, vec3(.13, .17, .1), splash * smoothstep(.45, .75, blotch) * .55);
                 float salt = exp(-pow((vWallPos.y - .58 - (blotch - .5) * .1) / .05, 2.)) * vertical;
                 concrete = mix(concrete, concrete * 1.15 + .03, salt * .45);
                 concrete *= mix(1., .86, smoothstep(.7, 1., wn.y));
@@ -74,12 +106,12 @@ function concreteMaterial() {
                     vec3 sigmaX = dFdx(-vViewPosition), sigmaY = dFdy(-vViewPosition);
                     vec3 r1 = cross(sigmaY, normal), r2 = cross(normal, sigmaX);
                     float det = dot(sigmaX, r1);
-                    vec2 dh = vec2(dFdx(wallHeight), dFdy(wallHeight)) * .16;
+                    vec2 dh = vec2(dFdx(wallHeight), dFdy(wallHeight)) * .09;
                     vec3 grad = sign(det) * (dh.x * r1 + dh.y * r2);
                     normal = normalize(abs(det) * normal - grad);
                 }`);
     };
-    material.customProgramCacheKey = () => 'sea-wall-concrete-2';
+    material.customProgramCacheKey = () => 'sea-wall-concrete-6';
     return material;
 }
 

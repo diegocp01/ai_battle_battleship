@@ -125,13 +125,9 @@ body.is-match .menu { display: none; }
 .menu-card { display: grid; gap: 14px; padding: 22px; border-radius: 32px; }
 .setup-title-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 0 2px 2px; }
 .setup-heading { display: flex; align-items: center; gap: 16px; min-width: 0; }
-.app-icon { position: relative; display: grid; place-items: center; flex: none; width: 60px; height: 60px; border-radius: 17px; overflow: hidden; background: linear-gradient(165deg, #3d7bf0 0%, #1f4fc4 52%, #102f86 100%); box-shadow: inset 0 0 0 .5px rgb(255 255 255 / 20%), inset 0 1px 0 rgb(255 255 255 / 35%), 0 10px 24px -10px rgb(31 79 196 / 80%); }
-.app-icon::before { content: ""; position: absolute; inset: 0; background: linear-gradient(165deg, rgb(255 255 255 / 25%) 0%, rgb(255 255 255 / 0) 45%); pointer-events: none; }
-.app-icon svg { position: relative; width: 100%; height: 100%; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.icon-hull, .icon-deck { fill: #eef2f8; }
-.icon-mast { stroke: #eef2f8; stroke-width: 2.4; }
-.icon-sea { stroke: #ffb48f; stroke-width: 2.8; }
-.icon-blast { fill: #ffcf5c; filter: drop-shadow(0 0 4px #ff9a3c); }
+/* The app icon: the carrier under the radar sweep, its own art (transparent corners), with a soft blue lift. */
+.app-icon { position: relative; display: block; flex: none; width: 60px; height: 60px; border-radius: 14px; box-shadow: 0 10px 24px -10px rgb(31 79 196 / 80%); }
+.app-icon img { display: block; width: 100%; height: 100%; }
 .setup-eyebrow { margin: 0 0 2px; font-size: 14px; font-weight: 600; color: var(--muted); }
 .menu h1 { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 36px; line-height: 1.05; font-weight: 700; letter-spacing: -.025em; margin: 0; }
 .menu h1:focus { outline: none; }

@@ -251,7 +251,10 @@ function faceted(stations, s) {
 //    (painted clay orange by its fleet).
 //  - 'codex': lit tail tips and a lit line along the top of each intake; the glow is cyan and the intake badge a
 //    glowing >_ (painted in its mascot's blue, with the navy of the mascot's visor as trim, by its fleet).
-// Returns geometry by material: gray (the paint), accent (the trim), glass, dark, glow, badge and logo.
+// Returns geometry by material: gray (the paint), accent (the trim), glass, dark, glow, badge and logo, and the
+// landing gear (gear, in dark) separately so a jet in the air can retract it: a twin-wheel nose gear and two
+// main gears under the intakes, standing the jet FIGHTER_RIDE_HEIGHT above the deck (times s).
+export const FIGHTER_RIDE_HEIGHT = .0205;
 export function stealthJet(s = 1, variant = 'claude') {
     const codex = variant === 'codex';
     const noseCone = faceted([
@@ -312,7 +315,16 @@ export function stealthJet(s = 1, variant = 'claude') {
         dark.push(place(box(.007 * s, .0012 * s, .004 * s), [.032 * s, .0106 * s, side * .0125 * s], [side * .5, 0, 0]));
         dark.push(place(box(.006 * s, .0012 * s, .0035 * s), [.012 * s, .0108 * s, side * .0165 * s], [side * .45, 0, 0]));
     }
-    return {gray, accent, glass: [canopy], dark, glow, badge, logo};
+    // Landing gear: struts down from the fuselage and the intakes to the wheels on the deck.
+    const gear = [];
+    const ground = -FIGHTER_RIDE_HEIGHT;
+    const wheel = (x, z, r, w) => place(cyl(r * s, r * s, w * s, 12), [x * s, (ground + r) * s, z * s], [Math.PI / 2, 0, 0]);
+    const strut = (x, z, top, bottom, t) => place(box(t * s, (top - bottom) * s, t * s), [x * s, (top + bottom) / 2 * s, z * s]);
+    gear.push(strut(.072, 0, -.006, ground + .0024, .0013), wheel(.072, .0016, .0024, .0012), wheel(.072, -.0016, .0024, .0012));
+    for (const side of [1, -1]) {
+        gear.push(strut(-.02, side * .0215, -.0105, ground + .003, .0016), wheel(-.02, side * .023, .003, .0019));
+    }
+    return {gray, accent, glass: [canopy], dark, glow, badge, logo, gear};
 }
 
 // E-2 Hawkeye: high wing, the big rotodome on its pylon, four small fins.

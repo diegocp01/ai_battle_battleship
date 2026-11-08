@@ -4,7 +4,7 @@ import {
     hullGeometry, hullProfile, deckGeometry, railGeometry, shipMaterials, flagMaterial, lerp,
 } from './shipkit.js';
 import { steelDeckTexture, teakDeckTexture, flightDeckTexture, hullNumberTexture } from './textures.js';
-import { sailor, crewGroup, windowRow, windowsAround, portholes, deckFittings, vents, raftRack, whips, roofRail, outlineRail, anchorGear, canisterLauncher, torpedoTubes, latticeMast, searchlight, ewArrays, stealthJet, hawkeye, seahawk, tugParts } from './detail.js';
+import { sailor, crewGroup, windowRow, windowsAround, portholes, deckFittings, vents, raftRack, whips, roofRail, outlineRail, anchorGear, canisterLauncher, torpedoTubes, latticeMast, searchlight, ewArrays, stealthJet, hawkeye, seahawk, tugParts, FIGHTER_RIDE_HEIGHT } from './detail.js';
 import { carrierSailor } from './flightdeck.js';
 import { DeckCargo } from './deck-cargo.js';
 // Each fleet's fighter, after the references: stealth fighters in the fleet's paint, with its trim and glow
@@ -522,15 +522,22 @@ function deckEdge(x, side) {
     return (x < points[0][0] ? points[0] : points.at(-1))[1];
 }
 
-// The strike jet the carrier launches: the same fighter as its deck park.
+// The strike jet the carrier launches: the same fighter as its deck park, with its landing gear (named 'gear',
+// so it can be retracted once airborne).
 export function jetMesh(mats, scale = 1.1, team = 'gpt') {
     const pieces = (FIGHTERS[team] || FIGHTERS.gpt).model(scale);
     const group = new THREE.Group();
     for (const [part, key] of Object.entries(FIGHTER_PARTS)) {
         if (pieces[part]?.length) group.add(partMesh(mats[key] || mats.jet, pieces[part]));
     }
+    if (pieces.gear?.length) {
+        const gear = partMesh(mats.dark || mats.jet, pieces.gear);
+        gear.name = 'gear';
+        group.add(gear);
+    }
     return group;
 }
+export { FIGHTER_RIDE_HEIGHT };
 
 // Gerald R. Ford-class carrier (337 m): the angled flight deck with a deck park of Super Hornets, Hawkeyes,
 // Seahawks and tractors; the island set well aft with its flat radar faces; deck-edge antennas, sponsons with
@@ -583,10 +590,12 @@ function carrier(b) {
     const jets = (FIGHTERS[b.team] || FIGHTERS.gpt).model(.95);
     const cargo = {kinds: {}, items: [], deck: CARRIER_DECK, island: {minX: -.62, maxX: -.18, minZ: .32, maxZ: .45}};
     cargo.kinds.jet = {parts: Object.fromEntries(Object.entries(FIGHTER_PARTS).map(([part, key]) => [key, jets[part] || []])), radius: .065, mass: 20000, draft: .008};
+    // Parked on their landing gear.
+    cargo.kinds.jet.parts.dark = [...cargo.kinds.jet.parts.dark, ...(jets.gear || [])];
     const park = [[2.15, .14, 2.4], [1.98, .22, 2.4], [1.81, .28, 2.4], [1.64, .33, 2.4], [1.47, .36, 2.4], [1.75, -.22, -.2],
         [-.78, .34, 2.25], [-1.0, .34, 2.25], [-1.22, .34, 2.25], [-1.44, .34, 2.25], [-1.66, .34, 2.25], [-1.88, .33, 2.25], [-2.1, .31, 2.25],
         [-.9, .19, 2.25], [-1.12, .19, 2.25], [-1.34, .19, 2.25], [-1.56, .19, 2.25], [-1.78, .18, 2.25], [1.2, .38, 2.5], [1.0, .4, 2.5]];
-    for (const [x, z, yaw] of park) cargo.items.push({kind: 'jet', x, y: top + .013, z, yaw});
+    for (const [x, z, yaw] of park) cargo.items.push({kind: 'jet', x, y: top + FIGHTER_RIDE_HEIGHT * .95, z, yaw});
     // The Hawkeyes wear the fleet's paint too, so every plane on the deck is in its colors.
     const hawk = hawkeye(1);
     cargo.kinds.hawkeye = {parts: {fighter: hawk.gray, white: hawk.white}, radius: .1, mass: 23000, draft: .008};
