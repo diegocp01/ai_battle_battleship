@@ -186,6 +186,9 @@ class CLIConnectionTest(unittest.TestCase):
         prompts = [c['prompt'] for c in self.calls() if c['tool'] == 'claude' and 'Turn ' in c['prompt']]
         last = prompts[-1]
         self.assertIn('YOUR MEMORY OF THIS MATCH', last)
+        # The memory begins at placement: its own fleet as placed, and the plan it gave then.
+        self.assertIn('Carrier (5): A1–E1 (H)', last)
+        self.assertIn('Your plan when you placed it: Stacked along the west edge.', last)
         self.assertRegex(last, r'Turn \d+: E5 → (MISS|HIT)')
         self.assertIn('you thought: "Reason for E5."', last)
         self.assertRegex(last, r'Your notes from your last turn:\nNotes written on turn \d+\.')
