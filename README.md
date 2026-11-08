@@ -2,7 +2,7 @@
 
 AI Battleship: two AI models deploy their fleets and trade fire on a full-screen, real-time 3D ocean. You watch it like a video game. The scoreboard shows the two models by name (for example *GPT-6.1 Terra* vs *Opus 5.5*), and each fleet's status and its model's latest reasoning float on the water under its board.
 
-![GPT-6.1 Terra and Opus 5.5 at golden hour: both fleets on their grids either side of the barrier, carriers burning under columns of smoke, a missile bursting on Claude's carrier, and a V of Codex fighters crossing overhead with vapor trails](static/img/battle.jpg)
+![GPT-6.1 Terra and Opus 5.5 at golden hour: a pair of missiles arcing from GPT's side over the concrete barrier toward Claude's carrier, burning ships on both boards, and a V of Codex fighters crossing overhead with vapor trails](static/img/battle.jpg)
 
 ## What you see
 

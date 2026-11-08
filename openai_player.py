@@ -19,6 +19,11 @@ from moves import MoveError, json_in
 
 KEY = 'OPENAI_API_KEY'
 STANDARD = {'id': 'standard', 'name': 'Standard'}
+# Ultrafast mode (`service_tier: "ultrafast"`, OpenAI's fastest tier at a higher price) is documented for these
+# models but is not yet in Codex's catalog or the SDK's list of tiers, so it is offered from here.
+# https://developers.openai.com/api/docs/guides/ultrafast-mode
+ULTRAFAST_MODELS = {'gpt-6.1-sol', 'gpt-6-astra'}
+ULTRAFAST = {'id': 'ultrafast', 'name': 'Ultrafast', 'description': 'fastest tier, higher price'}
 # GPT models outside Codex's catalog: the families that take reasoning effort, and the levels they all take.
 REASONING_FAMILY = re.compile(r'^gpt-(?:[5-9]|\d\d)(?:\.\d+)?(?:-[a-z]+)?$')
 COMMON_EFFORTS = ['low', 'medium', 'high']
@@ -84,14 +89,18 @@ def catalog():
         default = option['default_effort'] if option['default_effort'] in efforts else None
         speeds = [STANDARD] + [{'id': tier['id'], 'name': tier.get('name') or tier['id'].title(), 'description': tier.get('description', '')}
                                for tier in item.get('service_tiers') or [] if tier.get('id') in tiers_ok]
+        if item['slug'] in ULTRAFAST_MODELS and all(speed['id'] != ULTRAFAST['id'] for speed in speeds):
+            speeds.append(ULTRAFAST)
         _tiers[item['slug']] = {speed['id'] for speed in speeds[1:]}
         models.append({**option, 'efforts': ['default', *efforts], 'default_effort': 'default',
                        'effort_supported': bool(efforts), 'speeds': speeds, 'model_default': default})
         seen.add(item['slug'])
     for model_id in sorted(listed - seen, reverse=True):
         if REASONING_FAMILY.match(model_id):
+            speeds = [STANDARD, ULTRAFAST] if model_id in ULTRAFAST_MODELS else [STANDARD]
+            _tiers[model_id] = {speed['id'] for speed in speeds[1:]}
             models.append({'id': model_id, 'name': _name(model_id), 'efforts': ['default', *COMMON_EFFORTS],
-                           'default_effort': 'default', 'effort_supported': True, 'speeds': [STANDARD]})
+                           'default_effort': 'default', 'effort_supported': True, 'speeds': speeds})
     if not models:
         return {'models': [], 'default': '', 'error': 'This OpenAI key lists no GPT models that can play.'}
     return {'models': models, 'default': models[0]['id'], 'tool': 'OpenAI API'}

@@ -138,6 +138,9 @@ class APIConnectionTest(unittest.TestCase):
         self.assertEqual(gpt['gpt-6.1-sol']['efforts'], ['default', 'low', 'medium', 'high', 'max'])
         self.assertEqual(gpt['gpt-6.1-sol']['model_default'], 'low')
         self.assertEqual(gpt['gpt-6-luna']['speeds'][1], {'id': 'priority', 'name': 'Fast', 'description': '1.5x speed'})
+        # Ultrafast is offered on the models OpenAI documents it for, after Fast; not on others.
+        self.assertEqual([s['id'] for s in gpt['gpt-6.1-sol']['speeds']], ['standard', 'priority', 'ultrafast'])
+        self.assertNotIn('ultrafast', [s['id'] for s in gpt['gpt-6-luna']['speeds']])
         self.assertEqual(gpt['gpt-5.6-nano']['name'], 'GPT-5.6 Nano')
         self.assertEqual([s['id'] for s in gpt['gpt-5.6-nano']['speeds']], ['standard'])
 
@@ -185,6 +188,12 @@ class APIConnectionTest(unittest.TestCase):
         self.assertEqual([c.get('reasoning') for c in calls['openai'][-2:]], [{'summary': 'auto'}, None])
         gpt = self.client.get('/api/game-state').get_json()['players']['gpt']
         self.assertEqual((gpt['thought'], gpt['reasoning']), ('', 'Firing at A1.'))
+
+    def test_ultrafast_reaches_the_request(self):
+        state = self.start(gpt_model='gpt-6.1-sol', gpt_speed='ultrafast', claude_model='claude-haiku-5-5').get_json()['game_state']
+        self.assertEqual(state['players']['gpt']['speed'], 'ultrafast')
+        calls = self.play_two_turns()
+        self.assertEqual(calls['openai'][-1]['service_tier'], 'ultrafast')
 
     def test_speed_a_model_lacks_falls_back_to_standard(self):
         state = self.start(gpt_model='gpt-5.6-nano', gpt_speed='priority', claude_model='claude-haiku-5-5', claude_speed='fast').get_json()['game_state']

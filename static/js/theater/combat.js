@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RAMP, FRAME } from './effects.js';
-import { jetMesh } from './ships.js';
+import { jetMesh, FIGHTER_RIDE_HEIGHT } from './ships.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { WALL, WALL_CLEARANCE } from './wall.js';
 import { deckCrew, directorPose, shooterPose, CockpitHud } from './flightdeck.js';
@@ -474,9 +474,12 @@ export class Combat {
         const T = this.t, epoch = this.epoch;
         T.scene.updateMatrixWorld();
         const cat = carrier.catapult;
-        const deckStart = carrier.body.localToWorld(cat.start.clone());
-        const deckEnd = carrier.body.localToWorld(cat.end.clone());
         const scale = 1.15 * carrier.scale.x;
+        // The jet stands on its landing gear on the catapult track (the track is .015 above the deck surface).
+        const lift = new THREE.Vector3(0, FIGHTER_RIDE_HEIGHT * scale - .015 * carrier.scale.y, 0);
+        const shuttle = cat.start.clone().add(lift), release = cat.end.clone().add(lift);
+        const deckStart = carrier.body.localToWorld(shuttle.clone());
+        const deckEnd = carrier.body.localToWorld(release.clone());
         const jet = jetMesh(carrier.materials, scale, carrier.team);
         jet.traverse(o => { if (o.isMesh) o.castShadow = true; });
         // The bomb stays on the centreline station all the way in.
@@ -485,16 +488,18 @@ export class Combat {
         slung.castShadow = true;
         jet.add(slung);
         const forward = deckEnd.clone().sub(deckStart).normalize();
-        const heading = Math.atan2(-forward.z, forward.x);
-        // On the catapult: the jet at the shuttle, nose to the bow.
-        jet.position.copy(deckStart);
-        jet.rotation.set(0, heading, 0);
-        T.scene.add(jet);
-        const nozzle = () => jet.position.clone().addScaledVector(new THREE.Vector3(1, 0, 0).applyQuaternion(jet.quaternion), -.13 * scale);
+        const localForward = cat.end.clone().sub(cat.start).normalize();
+        // On the catapult: the jet at the shuttle, nose to the bow, held to the deck. It rides with the carrier
+        // (she surges on her berth and rolls with the swell) until the catapult fires, so it stays on the track
+        // with the crew round it.
+        jet.position.copy(shuttle);
+        jet.rotation.set(0, Math.atan2(-localForward.z, localForward.x), 0);
+        carrier.attach(jet);
+        const gear = jet.getObjectByName('gear');
+        const nozzle = () => jet.localToWorld(new THREE.Vector3(-.13 * scale, 0, 0));
         const heat = {get: () => ({at: nozzle(), radius: .05, strength: 1})};
         T.effects.heatSources.push(heat);
         // The jet blast deflector rises out of the deck behind the jet, hinged at its forward edge.
-        const localForward = cat.end.clone().sub(cat.start).normalize();
         const jbd = new THREE.Group();
         jbd.position.copy(cat.start).addScaledVector(localForward, -.16 * scale);
         jbd.position.y -= .014;
@@ -534,7 +539,7 @@ export class Combat {
         const spool = cinematic ? 2.8 : 1.5;
         let whistled = false, ready = false;
         await T.tween(spool, (k) => {
-            engine.update(jet.position, {level:.25 + .75*k, rate:.72 + .38*k, cutoff:1300 + 4700*k});
+            engine.update(jet.getWorldPosition(new THREE.Vector3()), {level:.25 + .75*k, rate:.72 + .38*k, cutoff:1300 + 4700*k});
             directorPose(crew[0].crew, T.time);
             shooterPose(crew[1].crew, k, T.time);
             // The lit wands draw streaks of light as they swing.
@@ -561,6 +566,13 @@ export class Combat {
             jet.traverse(o => { if (o !== slung) o.geometry?.dispose(); });
             return deckStart;
         }
+        // The catapult fires from where the deck is now: the launch starts from the jet's place on the track, and
+        // from here on the jet flies free of the ship.
+        T.scene.updateMatrixWorld();
+        deckStart.copy(carrier.body.localToWorld(shuttle.clone()));
+        deckEnd.copy(carrier.body.localToWorld(release.clone()));
+        forward.copy(deckEnd).sub(deckStart).normalize();
+        T.scene.attach(jet);
         // The deck camera stands on the port side of the bow catapult, clear of the deck park on the starboard side.
         const deckCamera = carrier.body.localToWorld(cat.start.clone().lerp(cat.end, .72).add(new THREE.Vector3(0, .026, -.17)));
         T.director.cueStrike('catapult', {start: deckStart.clone(), end: deckEnd.clone(), forward, camera: deckCamera});
@@ -657,6 +669,8 @@ export class Combat {
                 p.lowered = true;
                 T.tween(1.2, (q) => { panel.rotation.z = THREE.MathUtils.lerp(.5, Math.PI / 2, q); }).then(() => setTimeout(() => jbd.removeFromParent(), 0));
             }
+            // Gear up once it is clear of the deck.
+            if (gear && gear.visible && s >= deck + .5) gear.visible = false;
             if (!airborne && s >= deck + 1.2) { airborne = true; radio('radioAirborne', position); }
             // Over the barrier: with the cinematic camera, the view from the pilot's seat down the dive, through
             // the head-up display; otherwise a camera riding down with it.
