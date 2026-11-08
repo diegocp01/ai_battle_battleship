@@ -15,8 +15,8 @@ from flask import Flask, jsonify, render_template, request
 
 from battleship import SHIPS, fire, fire_prompt, fleet_destroyed, knowledge, new_player, normalize_coord, \
     placement_prompt, random_placement, validate_placement
-from players import MODES, SIMULATED_STRATEGY, ProviderError, api_placement, api_shot, model_catalog, select_models, \
-    simulated_placement, simulated_shot
+from players import MODES, SIMULATED_STRATEGY, ProviderError, api_placement, api_shot, cli_placement, cli_shot, model_catalog, \
+    select_models, simulated_placement, simulated_shot
 
 app = Flask(__name__)
 
@@ -53,6 +53,7 @@ def new_state(mode='test', players=None):
                 **new_player(),
                 'model': players[key + '_model'],
                 'effort': players[key + '_effort'],
+                'speed': players[key + '_speed'],
                 'name': players[key + '_name'],
                 'reasoning': '',
                 'last_time': 0.0,
@@ -86,6 +87,8 @@ def save_game(state):
         'claude_name': claude['name'],
         'gpt_effort': gpt['effort'],
         'claude_effort': claude['effort'],
+        'gpt_speed': gpt.get('speed', 'standard'),
+        'claude_speed': claude.get('speed', 'standard'),
         'gpt_shots': len(gpt['shots']),
         'claude_shots': len(claude['shots']),
         'gpt_hits': sum(1 for shot in gpt['shots'] if shot['result'] != 'miss'),
@@ -135,6 +138,7 @@ def client_state(state, started=True):
             'name': player['name'],
             'model': player['model'],
             'effort': player['effort'],
+            'speed': player.get('speed', 'standard'),
             'fleet': fleet,
             'sunk': list(player['sunk']),
             'shots': shots,
@@ -211,7 +215,7 @@ def start_games():
         return jsonify({'error': 'Send a JSON object with mode and models.'}), 400
     mode = data.get('mode', 'test')
     if mode not in MODES:
-        return jsonify({'error': 'Choose Test or API keys.'}), 400
+        return jsonify({'error': 'Choose Test, CLIs or API keys.'}), 400
     try:
         players = select_models(mode, data)
     except ProviderError as error:
@@ -243,15 +247,17 @@ def place_ships():
         seat = state['players'][player]
         started = time.time()
         try:
+            label = 'Player A (GPT)' if player == 'gpt' else 'Player B (Claude)'
             if state['mode'] == 'test':
                 placement, reasoning = simulated_placement(SIMULATED_STRATEGY, rng_for(state, player, 'placement'))
+            elif state['mode'] == 'cli':
+                placement, reasoning = cli_placement(player, placement_prompt(label), seat['model'], seat['effort'])
             else:
-                label = 'Player A (GPT)' if player == 'gpt' else 'Player B (Claude)'
-                placement, reasoning = api_placement(player, placement_prompt(label), seat['model'])
+                placement, reasoning = api_placement(player, placement_prompt(label), seat['model'], seat['effort'], seat['speed'])
         except ProviderError as error:
-            return jsonify({'error': str(error)}), 502
+            return jsonify({'error': f"{seat['name']}: {error}"}), 502
         except Exception as error:  # SDK and network errors
-            return jsonify({'error': f"{'GPT' if player == 'gpt' else 'Claude'} API error: {error}"}), 502
+            return jsonify({'error': f"{seat['name']} error: {error}"}), 502
         elapsed = time.time() - started
         fleet, problem = validate_placement(placement)
         if problem:
@@ -289,15 +295,17 @@ def next_move():
         started = time.time()
         note = ''
         try:
+            label = 'Player A (GPT)' if player == 'gpt' else 'Player B (Claude)'
             if state['mode'] == 'test':
                 target, reasoning = simulated_shot(player, SIMULATED_STRATEGY, info, rng_for(state, player, turn))
+            elif state['mode'] == 'cli':
+                target, reasoning = cli_shot(player, fire_prompt(label, shooter, info, turn), shooter['model'], shooter['effort'])
             else:
-                label = 'Player A (GPT)' if player == 'gpt' else 'Player B (Claude)'
-                target, reasoning = api_shot(player, fire_prompt(label, shooter, info, turn), shooter['model'])
+                target, reasoning = api_shot(player, fire_prompt(label, shooter, info, turn), shooter['model'], shooter['effort'], shooter['speed'])
         except ProviderError as error:
-            return jsonify({'error': str(error)}), 502
+            return jsonify({'error': f"{shooter['name']}: {error}"}), 502
         except Exception as error:
-            return jsonify({'error': f"{'GPT' if player == 'gpt' else 'Claude'} API error: {error}"}), 502
+            return jsonify({'error': f"{shooter['name']} error: {error}"}), 502
         elapsed = time.time() - started
         requested = normalize_coord(target)
         if not requested or requested in info['fired']:

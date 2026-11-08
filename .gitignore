@@ -16,3 +16,6 @@ __pycache__/
 
 # saved match history
 data/
+
+# node (Codex SDK for the CLIs connection)
+node_modules/

@@ -1,0 +1,8 @@
+{
+  "name": "ai-battleship",
+  "private": true,
+  "description": "Node side of the CLIs connection: the Codex SDK bridge.",
+  "dependencies": {
+    "@openai/codex-sdk": "0.164.0"
+  }
+}
