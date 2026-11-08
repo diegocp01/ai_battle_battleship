@@ -29,18 +29,18 @@ test('a failed download or decoder does not prevent remaining sounds loading', a
 });
 
 function mockAudio() {
-    const events = [], filters = [];
+    const events = [], filters = [], sources = [], gains = [];
     const param = () => ({value: 0, setValueAtTime(...v) {events.push(['set', ...v]);},
-        linearRampToValueAtTime(...v) {events.push(['ramp', ...v]);}, setTargetAtTime() {}});
+        linearRampToValueAtTime(...v) {events.push(['ramp', ...v]);}, setTargetAtTime(v) {this.value = v;}, cancelScheduledValues() {}});
     const node = () => ({gain: param(), playbackRate: param(), pan: param(), frequency: param(), Q: param(),
         connect(other) {return other;}, disconnect() {this.disconnected = true;},
         start(t) {this.started = t;}, stop(t) {this.stopped = t ?? 0;}});
     const audio = new BattleAudio();
-    audio.ctx = {state: 'running', currentTime: 10, createBufferSource: node,
-        createGain: node, createStereoPanner: node,
+    audio.ctx = {state: 'running', currentTime: 10, createBufferSource() {const source=node(); sources.push(source); return source;},
+        createGain() {const gain=node(); gains.push(gain); return gain;}, createStereoPanner: node,
         createBiquadFilter() {const filter = node(); filters.push(filter); return filter;}};
     audio.master = node(); audio.reverb = node();
-    return {audio, events, filters};
+    return {audio, events, filters, sources, gains};
 }
 
 test('recorded playback preserves spatial delay, scale, cleanup and voice cap', () => {
@@ -122,4 +122,47 @@ test('impact playback selects its sample, filters wet hits, cleans up, and falls
     assert.equal([...audio.sampleVoices][0].buffer, fallback);
     audio.samples.clear();
     assert.equal(audio.playSample('explosion', null, 1, {weapon:'torpedo'}), false);
+});
+
+
+test('carrier engine stays alive beyond its sample and follows the moving jet until stopped', () => {
+    const {audio, sources, filters, gains} = mockAudio();
+    audio.samples.set('jetEngine', {duration:8});
+    audio.place = at => ({gain:at.x === 1 ? .8 : .2, pan:at.x === 1 ? -.5 : .5});
+    const loop = audio.startLoop('jetEngine', {x:1}, {level:1, rate:.8, cutoff:1200});
+    assert.equal(sources[0].loop, true);
+    assert.equal(sources[0].stopped, undefined);
+    assert.equal(sources[0].playbackRate.value, .8);
+    const nearGain = gains[0].gain.value;
+    audio.ctx.currentTime = 40; // A slow cinematic lasts much longer than the recording.
+    audio.pace = .25;
+    loop.update({x:2}, {level:1, rate:1.1, cutoff:6000});
+    assert.ok(gains[0].gain.value < nearGain);
+    assert.equal(filters[0].frequency.value, 6000);
+    assert.equal(sources[0].playbackRate.value, 1.1);
+    assert.equal(sources[0].stopped, undefined);
+    loop.stop(); loop.stop();
+    assert.equal(audio.loopVoices.size, 0);
+    assert.equal(sources[0].stopped, 40.12);
+    sources[0].onended();
+    assert.ok(sources[0].disconnected && filters[0].disconnected);
+});
+
+test('continuous flight audio survives mute, has a bounded fallback, and stops on reset', () => {
+    const {audio, sources} = mockAudio();
+    audio.brown = {duration:3}; audio.noise = {duration:3};
+    audio.muted = true;
+    const engine = audio.startLoop('jetEngine', null);
+    assert.equal(sources[0].buffer, audio.brown);
+    audio.startLoop('cockpitWind', null);
+    assert.equal(sources[1].buffer, audio.noise);
+    for (let i=0;i<5;i++) audio.startLoop('jetEngine', null);
+    assert.equal(audio.loopVoices.size, 4);
+    assert.ok(sources[0].stopped > 10);
+    audio.stopLoops();
+    assert.equal(audio.loopVoices.size, 0);
+    assert.ok(sources.every(source => source.stopped > 10));
+    engine.update(null); // A stale animation callback cannot revive a stopped voice.
+    assert.equal(audio.loopVoices.size, 0);
+    assert.doesNotThrow(() => new BattleAudio().startLoop('jetEngine', null).stop());
 });

@@ -14,6 +14,11 @@ export const SOUND_BANK = Object.freeze({
     splash: {file: 'ocean-miss.wav', gain: .8},
     creak: {file: 'ship-sinking.wav', gain: .8},
     jet: {file: 'jet.wav', gain: .65, timed: true},
+    jetEngine: {file: 'jet-engine-loop.wav', gain: .65},
+    catapult: {file: 'carrier-catapult.wav', gain: .85},
+    deckWhistle: {file: 'deck-whistle.wav', gain: .38},
+    cockpitWind: {file: 'cockpit-wind-loop.wav', gain: .3},
+    cockpitWarning: {file: 'cockpit-warning.wav', gain: .25},
     torpedo: {file: 'torpedo.wav', gain: .6, timed: true},
     ocean: {file: 'ocean.wav', gain: .16},
 });
@@ -22,14 +27,10 @@ export const SOUND_BANK = Object.freeze({
 // under the same key (for example `radioStrikeTasking: {file: 'radio-strike-tasking.wav', gain: .8}`); nothing
 // else needs to change. The radio calls play only in the cinematic camera.
 export const OPEN_CUES = Object.freeze({
-    catapult: 'Steam catapult stroke: the shuttle slamming down the track, steam roar, the jet gone in two seconds.',
-    deckWhistle: 'The catapult officer\'s whistle and the deck crew calling clear, as the jet spools up.',
     radioStrikeTasking: 'Radio, carrier to pilot: strike tasking and clearance to launch (first seconds of the spool-up).',
     radioPilotReady: 'Radio, pilot: ready, engines at full power, salute to the catapult officer.',
     radioAirborne: 'Radio, pilot: airborne, climbing, heading for the target.',
     radioCommit: 'Radio, pilot: target in sight, committing to the dive (as the jet crosses the barrier).',
-    cockpitWind: 'In the cockpit during the dive: airflow over the canopy and the engines, rising with speed.',
-    cockpitWarning: 'In the cockpit near the end of the dive: the altitude / pull-up warning tone.',
     radioFinal: 'Radio, last words between the carrier and the pilot just before impact.',
 });
 
