@@ -3,6 +3,7 @@ import { RAMP, FRAME } from './effects.js';
 import { jetMesh } from './ships.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { WALL, WALL_CLEARANCE } from './wall.js';
+import { deckCrew, directorPose, shooterPose, CockpitHud } from './flightdeck.js';
 
 // How a shot plays out. The attacking fleet picks a ship that is still afloat and uses its weapon: the
 // battleship trains a turret and fires a three-gun salvo, cruisers and destroyers fire their 5-inch gun or
@@ -470,11 +471,44 @@ export class Combat {
         panel.rotation.z = Math.PI / 2;
         jbd.add(panel);
         carrier.attach(jbd);
-        T.director.cueStrike('spool', {at: deckStart.clone(), forward});
+        // The deck crew at the catapult: a director ahead of the jet and the shooter beside its nose, both with
+        // lighted wands in each hand.
+        const localSide = new THREE.Vector3(-localForward.z, 0, localForward.x);
+        const crew = [
+            {crew: deckCrew(carrier.materials.yellow, carrier.materials.yellow), at: cat.start.clone().addScaledVector(localForward, .2 * scale).addScaledVector(localSide, -.07 * scale), role: 'director'},
+            {crew: deckCrew(carrier.materials.yellow, carrier.materials.white), at: cat.start.clone().addScaledVector(localForward, .1 * scale).addScaledVector(localSide, .095 * scale), role: 'shooter'},
+        ];
+        for (const member of crew) {
+            const g = member.crew.group;
+            g.position.copy(member.at);
+            member.crew.base = member.at.y;
+            // Facing the jet.
+            const toJet = cat.start.clone().sub(member.at);
+            g.rotation.y = Math.atan2(-toJet.z, toJet.x);
+            carrier.attach(g);
+        }
+        const cinematic = T.director.mode === 'cinematic';
+        // Radio calls play only with the cinematic camera; the cues are silent until recordings are added.
+        const radio = (cue, at = deckStart) => { if (cinematic) T.audio.play(cue, at); };
+        T.scene.updateMatrixWorld();
+        const directorAt = crew[0].crew.group.getWorldPosition(new THREE.Vector3());
+        T.director.cueStrike('spool', {at: deckStart.clone(), forward, crew: directorAt});
         T.audio.play('jet', deckEnd, 6.5);
-        // Spool-up: the deflector comes up, the engines wind to full afterburner, steam leaks from the track.
-        const spool = 1.5;
+        radio('radioStrikeTasking');
+        // Spool-up: the deflector comes up, the engines wind to full afterburner, steam leaks from the track, and
+        // the crew runs the launch. Longer with the cinematic camera, so the signals and the radio can play out.
+        const spool = cinematic ? 2.8 : 1.5;
+        let whistled = false, ready = false;
         await T.tween(spool, (k) => {
+            directorPose(crew[0].crew, T.time);
+            shooterPose(crew[1].crew, k, T.time);
+            // The lit wands draw streaks of light as they swing.
+            for (const member of crew) for (const arm of member.crew.arms) {
+                const tip = arm.tip.getWorldPosition(new THREE.Vector3());
+                T.effects.spawn({x: tip.x, y: tip.y, z: tip.z, ramp: RAMP.EMBER, frame: FRAME.GLOW, size: .006, life: .12, drag: 0, intensity: 1.2});
+            }
+            if (!whistled && k > .25) { whistled = true; T.audio.play('deckWhistle', deckStart); }
+            if (!ready && k > .55) { ready = true; radio('radioPilotReady'); }
             panel.rotation.z = THREE.MathUtils.lerp(Math.PI / 2, .5, Math.min(1, k * 2.2));
             T.scene.updateMatrixWorld();
             T.effects.afterburner(nozzle(), forward.clone().negate(), new THREE.Vector3(), Math.min(1, .35 + k * 1.3), scale, 1 / 60);
@@ -486,6 +520,7 @@ export class Combat {
         // The deck camera stands on the port side of the bow catapult, clear of the deck park on the starboard side.
         const deckCamera = carrier.body.localToWorld(cat.start.clone().lerp(cat.end, .72).add(new THREE.Vector3(0, .026, -.17)));
         T.director.cueStrike('catapult', {start: deckStart.clone(), end: deckEnd.clone(), forward, camera: deckCamera});
+        T.audio.play('catapult', deckStart);
         const toward = impact.clone().sub(deckEnd).setY(0).normalize();
         const side = new THREE.Vector3().crossVectors(toward, UP).multiplyScalar(Math.random() < .5 ? 1 : -1);
         const outward = Math.sign(impact.x) || 1;
@@ -547,7 +582,13 @@ export class Combat {
         };
         const glowAt = () => jet.position.clone().addScaledVector(new THREE.Vector3(1, 0, 0).applyQuaternion(jet.quaternion), -.5 * scale);
         T.effects.follow(glowAt, .55, duration, new THREE.Color(1, .62, .32));
-        let diving = false, terminal = false;
+        let diving = false, terminal = false, airborne = false, warned = false;
+        // The pilot's eye in the cockpit, and the head-up display's combiner glass a little ahead of it.
+        const eye = new THREE.Vector3(.054 * scale, .0128 * scale, 0);
+        const hud = new CockpitHud(.0042 * scale);
+        hud.mesh.position.copy(eye).add(new THREE.Vector3(.0085 * scale, -.0006 * scale, 0));
+        hud.mesh.rotation.y = -Math.PI / 2;
+        jet.add(hud.mesh);
         const flight = {kind: 'jet', path: (k) => curve.getPointAt(Math.min(1, distanceAt(k * duration) / length)), duration, mesh: jet, primary: true, orient: true};
         const promise = this.fly(flight);
         const record = this.projectiles[this.projectiles.length - 1];
@@ -571,22 +612,45 @@ export class Combat {
                 p.lowered = true;
                 T.tween(1.2, (q) => { panel.rotation.z = THREE.MathUtils.lerp(.5, Math.PI / 2, q); }).then(() => setTimeout(() => jbd.removeFromParent(), 0));
             }
-            // Over the barrier, the camera rides down with it.
+            if (!airborne && s >= deck + 1.2) { airborne = true; radio('radioAirborne', position); }
+            // Over the barrier: with the cinematic camera, the view from the pilot's seat down the dive, through
+            // the head-up display; otherwise a camera riding down with it.
             if (!diving && s >= overS) {
                 diving = true;
-                T.director.cueStrike('dive', {target: impact.clone()});
+                if (cinematic) {
+                    hud.mesh.visible = true;
+                    T.director.cueStrike('cockpit', {target: impact.clone(), jet, eye});
+                    radio('radioCommit', position);
+                    T.audio.play('cockpitWind', position);
+                } else T.director.cueStrike('dive', {target: impact.clone()});
             }
+            if (hud.mesh.visible) {
+                const dir = ahead.clone().sub(position).normalize();
+                hud.draw({
+                    pitch: Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)), bank: p.bank || 0,
+                    heading: (Math.atan2(dir.x, -dir.z) * 180 / Math.PI + 360) % 360,
+                    speed: 300 + speedAt(s) * 38, altitude: Math.max(0, (position.y - impact.y) * 75 * 3.28),
+                    range: Math.max(0, (length - s) * 75 / 1852),
+                });
+            }
+            if (!warned && cinematic && s >= length - 3.2) { warned = true; T.audio.play('cockpitWarning', position); }
             // The last 130 metres: a camera by the target watches it come in, in slow motion.
             if (!terminal && s >= length - 1.75) {
                 terminal = true;
                 const view = this.terminalVantage(impact, toward, outward, Boolean(context.victim));
+                hud.mesh.visible = false;
                 T.director.cueStrike('terminal', {target: impact.clone(), camera: view, look: impact.clone().lerp(position, .22)});
+                radio('radioFinal', position);
                 T.slowMotion(.3, .9);
             }
         };
         const arrival = await promise;
         T.effects.heatSources.splice(T.effects.heatSources.indexOf(heat), 1);
+        hud.mesh.visible = false;
+        hud.texture.dispose();
         jet.traverse(o => { if (o !== slung) o.geometry?.dispose(); });
+        // The crew walk off the catapult once the shot is over.
+        for (const member of crew) member.crew.group.removeFromParent();
         return arrival;
     }
 

@@ -141,6 +141,7 @@ export class Director {
     // right alongside the round as it comes down, in slow motion at the end. Impact: low over the water on the
     // far side as it lands. Tactical mode keeps the wide view and only leans toward each shot.
     beginShot({shooter, target, close}) {
+        this.onNear?.(.1);
         if (this.mode !== 'cinematic' || this.reducedMotion) {
             if (this.mode === 'tactical') this.leanToward(shooter, target);
             return;
@@ -272,14 +273,35 @@ export class Director {
         shot.strike = true;
         const f = data.forward;
         const side = f ? new THREE.Vector3().crossVectors(f, UP).normalize().multiplyScalar(shot.sideSign) : null;
-        if (stage === 'spool') {
+        if (stage === 'spool' && data.crew) {
+            // Low on the deck behind the director's shoulder: the lit wands circling in the foreground, the jet
+            // spooling up beyond them, its afterburners lighting the blast deflector.
+            shot.phase = 'spool';
+            const c = data.crew, at = data.at;
+            const away = c.clone().sub(at).setY(0).normalize();
+            const across = new THREE.Vector3().crossVectors(away, UP).normalize().multiplyScalar(shot.sideSign);
+            const position = c.clone().addScaledVector(away, .1).addScaledVector(across, .03).add(new THREE.Vector3(0, .024, 0));
+            this.cut(position, at.clone().lerp(c, .42).add(new THREE.Vector3(0, .016, 0)));
+            this.goal.position.copy(position).addScaledVector(across, -.02).addScaledVector(away, .015);
+            this.goal.smooth = 3;
+            this.goal.lookSmooth = 2;
+            this.onNear?.(.02);
+        } else if (stage === 'spool') {
             shot.phase = 'spool';
             const at = data.at;
             this.cut(at.clone().addScaledVector(f, .4).addScaledVector(side, .3).add(new THREE.Vector3(0, .05, 0)), at.clone().addScaledVector(f, -.06).add(new THREE.Vector3(0, .015, 0)));
             this.goal.position.copy(at).addScaledVector(f, .3).addScaledVector(side, .25).add(new THREE.Vector3(0, .045, 0));
             this.goal.smooth = 2.6;
             this.goal.lookSmooth = 1.6;
+        } else if (stage === 'cockpit') {
+            // In the pilot's seat: the canopy bow and nose ahead, the head-up display, the target growing.
+            shot.phase = 'cockpit';
+            shot.jet = data.jet;
+            shot.eye = data.eye.clone();
+            shot.diveTarget = data.target.clone();
+            this.onNear?.(.003);
         } else if (stage === 'catapult') {
+            this.onNear?.(.1);
             // On the deck near the bow, just clear of the jet's wingtip, low: the jet charges at the lens.
             shot.phase = 'catapult';
             shot.forward = f.clone();
@@ -291,6 +313,7 @@ export class Director {
             shot.phase = 'dive';
             shot.diveTarget = data.target.clone();
         } else if (stage === 'terminal') {
+            this.onNear?.(.1);
             // Beside the dive, low over the water (above the deck for a ship), far enough back for the blast to
             // fit the frame. It stays put and turns gently from the incoming jet down to the target.
             shot.phase = 'terminal';
@@ -303,6 +326,14 @@ export class Director {
     // Per frame during the strike's flight. Returns true when it has set the camera itself.
     followStrike(projectile) {
         const shot = this.shot;
+        if (shot.phase === 'cockpit' && shot.jet) {
+            const jet = shot.jet;
+            jet.updateMatrixWorld();
+            const position = jet.localToWorld(shot.eye.clone());
+            const look = jet.localToWorld(shot.eye.clone().add(new THREE.Vector3(1, -.04, 0)));
+            this.cut(position, look);
+            return true;
+        }
         if (shot.phase === 'dive') {
             // Rigidly behind and above the jet, looking down its dive at the target.
             const dir = shot.dir || shot.forward;
@@ -376,6 +407,7 @@ export class Director {
     }
 
     impact(point, kind) {
+        this.onNear?.(.1);
         const shot = this.shot;
         this.shake = Math.max(this.shake, kind === 'miss' ? .05 : kind === 'sunk' ? .3 : .2);
         if (!shot || this.mode !== 'cinematic') return;
@@ -428,6 +460,7 @@ export class Director {
     }
 
     endShot(hold = 0) {
+        this.onNear?.(.1);
         this.releaseAt = this.time + hold;
     }
 
@@ -482,6 +515,9 @@ export class Director {
             this.velocity.y = Math.max(this.velocity.y, 0);
         }
         this.camera.position.copy(this.position);
+        // In the cockpit the pilot's head rolls with the jet, so the horizon tilts and the HUD stays square.
+        if (this.shot?.phase === 'cockpit' && this.shot.jet) this.camera.up.set(0, 1, 0).applyQuaternion(this.shot.jet.getWorldQuaternion(this.rollQuat || (this.rollQuat = new THREE.Quaternion())));
+        else this.camera.up.set(0, 1, 0);
         this.camera.lookAt(this.look);
         // Ready for a drag to take over from exactly this view.
         if (!this.dragging) this.controls.target.copy(this.look);
