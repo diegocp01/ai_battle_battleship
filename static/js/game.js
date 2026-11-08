@@ -42,7 +42,11 @@ function setMode(next) {
     const active = ['running', 'pausing'].includes(mode);
     const loading = ['loading', 'starting'].includes(mode);
     $('play-mode').disabled = active || loading || !configuration;
-    for (const key of PLAYERS) $(key + '-model').disabled = active || loading || !configuration;
+    for (const key of PLAYERS) {
+        $(key + '-model').disabled = active || loading || !configuration;
+        $(key + '-effort').disabled = active || loading || !configuration;
+        $(key + '-speed').disabled = active || loading || !configuration;
+    }
     $('btn-run').disabled = loading || (configuration ? !PLAYERS.every(key => $(key + '-model').value) : mode !== 'error');
     $('btn-run').querySelector('span').textContent = ({loading: 'Loading…', starting: 'Starting…', error: 'Try again'})[mode] || 'Start battle';
     $('btn-pause').classList.toggle('hidden', !active);
@@ -262,7 +266,7 @@ function render(current) {
     renderScoreboard(current);
     if (current.phase === 'placement') setPhase('Fleet deployment');
     else if (current.game_over) setPhase(`${names[current.winner]} wins`);
-    else setPhase(current.mode === 'test' ? 'Live · simulated' : 'Live · API');
+    else setPhase(({test: 'Live · simulated', cli: 'Live · CLI'})[current.mode] || 'Live · API');
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -501,10 +505,16 @@ async function runGameLoop() {
 // Setup
 // ---------------------------------------------------------------------------------------------------------
 
+const MODE_DESCRIPTIONS = {test: 'Simulated moves, no LLM calls', cli: 'Claude Code CLI and Codex SDK, your sign-ins', api: 'OpenAI and Anthropic APIs, keys in .env'};
+const EFFORT_NAMES = {default: 'Default', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra'};
+
 function renderMode(selected) {
     $('play-mode').value = selected;
     $('test-badge').classList.toggle('hidden', selected !== 'test');
-    $('mode-description').textContent = ({test: 'Simulated moves, no LLM calls', api: 'Live models, keys in .env'})[selected];
+    // A side whose tool is missing says why, in place of the description.
+    const problems = PLAYERS.map(key => configuration?.models[selected]?.[key]?.error).filter(Boolean);
+    $('mode-description').textContent = problems.join(' ') || MODE_DESCRIPTIONS[selected];
+    $('mode-description').classList.toggle('mode-warning', problems.length > 0);
 }
 
 function populateModels(selected, preferred = {}) {
@@ -512,16 +522,66 @@ function populateModels(selected, preferred = {}) {
     for (const key of PLAYERS) {
         const info = configuration.models[selected][key];
         const select = $(key + '-model');
-        select.replaceChildren(...info.models.map(model => {
+        if (!info.models.length) {
             const option = document.createElement('option');
-            option.value = model.id;
-            option.textContent = model.name;
-            return option;
-        }));
-        const wanted = preferred[key] || saved[key + '_model'] || info.default;
-        select.value = info.models.some(model => model.id === wanted) ? wanted : info.default;
+            option.value = '';
+            option.textContent = 'Not available';
+            select.replaceChildren(option);
+        } else {
+            select.replaceChildren(...info.models.map(model => {
+                const option = document.createElement('option');
+                option.value = model.id;
+                option.textContent = model.name;
+                return option;
+            }));
+            const wanted = preferred[key] || saved[key + '_model'] || info.default;
+            select.value = info.models.some(model => model.id === wanted) ? wanted : info.default;
+        }
+        populateEffort(key, preferred[key + '_effort'] || saved[key + '_effort']);
+        populateSpeed(key, preferred[key + '_speed'] || saved[key + '_speed']);
     }
     showNames();
+}
+
+function selectedModel(key) {
+    const info = configuration.models[$('play-mode').value]?.[key];
+    return info?.models.find(item => item.id === $(key + '-model').value);
+}
+
+// The speeds the chosen model offers (Standard, and Fast where the API has it); hidden when there is no choice.
+function populateSpeed(key, wanted) {
+    const speeds = selectedModel(key)?.speeds || [];
+    const select = $(key + '-speed');
+    $(key + '-speed-field').classList.toggle('hidden', speeds.length < 2);
+    select.replaceChildren(...speeds.map(speed => {
+        const option = document.createElement('option');
+        option.value = speed.id;
+        option.textContent = speed.name + (speed.description ? ' · ' + speed.description : '');
+        return option;
+    }));
+    select.value = speeds.some(speed => speed.id === wanted) ? wanted : speeds[0]?.id || '';
+}
+
+// The reasoning efforts the chosen model supports, for connections that let you pick one.
+function populateEffort(key, wanted) {
+    const model = selectedModel(key);
+    const field = $(key + '-effort-field'), select = $(key + '-effort');
+    field.classList.toggle('hidden', !model?.effort_supported);
+    if (!model?.effort_supported) {
+        select.replaceChildren();
+        return;
+    }
+    // A remembered or restored choice if this model has it; otherwise the model's own default.
+    const current = wanted;
+    select.replaceChildren(...model.efforts.map(effort => {
+        const option = document.createElement('option');
+        option.value = effort;
+        option.textContent = EFFORT_NAMES[effort] || effort[0].toUpperCase() + effort.slice(1);
+        if (effort === 'default' && model.model_default) option.textContent += ` (${(EFFORT_NAMES[model.model_default] || model.model_default).toLowerCase()})`;
+        else if (effort === model.default_effort && effort !== 'default') option.textContent += ' (default)';
+        return option;
+    }));
+    select.value = model.efforts.includes(current) ? current : model.default_effort;
 }
 
 // The fleet banners on the water name the models: the ones playing, or before a match the ones picked in the menu.
@@ -538,7 +598,7 @@ function rememberSettings() {
     const selected = $('play-mode').value;
     preferences.mode = selected;
     preferences.models = preferences.models || {};
-    preferences.models[selected] = {gpt_model: $('gpt-model').value, claude_model: $('claude-model').value};
+    preferences.models[selected] = Object.fromEntries(PLAYERS.flatMap(key => ['model', 'effort', 'speed'].map(field => [key + '_' + field, $(key + '-' + field).value])));
     savePreferences();
 }
 
@@ -558,7 +618,7 @@ async function startGames(event) {
         await restoreSession();
         return;
     }
-    const settings = {mode: $('play-mode').value, gpt_model: $('gpt-model').value, claude_model: $('claude-model').value};
+    const settings = {mode: $('play-mode').value, ...Object.fromEntries(PLAYERS.flatMap(key => ['model', 'effort', 'speed'].map(field => [key + '_' + field, $(key + '-' + field).value])))};
     setMode('starting');
     try {
         const data = await request('start-games', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(settings)});
@@ -604,7 +664,7 @@ async function restoreSession() {
         const saved = await request('game-state');
         if (saved.started) {
             renderMode(saved.mode);
-            populateModels(saved.mode, {gpt: saved.players.gpt.model, claude: saved.players.claude.model});
+            populateModels(saved.mode, Object.fromEntries(PLAYERS.flatMap(key => [[key, saved.players[key].model], [key + '_effort', saved.players[key].effort], [key + '_speed', saved.players[key].speed]])));
             render(saved);
             setScreen('match');
             if (saved.game_over) await finishGame(saved, false);
@@ -633,7 +693,11 @@ $('btn-pause').addEventListener('click', () => {
     setMode('pausing');
     setStatus('Pausing after this turn.');
 });
-for (const key of PLAYERS) $(key + '-model').addEventListener('change', showNames);
+for (const key of PLAYERS) $(key + '-model').addEventListener('change', () => {
+    populateEffort(key);
+    populateSpeed(key);
+    showNames();
+});
 $('play-mode').addEventListener('change', () => {
     const selected = $('play-mode').value;
     renderMode(selected);

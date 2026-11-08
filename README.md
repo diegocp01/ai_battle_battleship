@@ -55,16 +55,60 @@ Everything is generated in code with [three.js](https://threejs.org) (vendored i
 - **Under each board**: one line of minimal ship icons (dimmed once a ship is sunk, a red dot when damaged) and the model's latest explanation, fixed on the water like the A–J and 1–10 labels. They fade out in close-ups and stay hidden behind the barrier.
 - **Bottom**: the current attack or event, with Pause, New match and History.
 
-Shots, hits, accuracy and thinking time are not shown during the match. They are saved with every API game and appear in the *History* table.
+Shots, hits, accuracy and thinking time are not shown during the match. They are saved with every live game (CLIs or API keys) and appear in the *History* table.
 
 ## Connections
 
 Pick one under *Connection* on the setup screen, then pick a model for each fleet:
 
 - **Test** (default): the chosen models are shown, but their moves are simulated: no LLM calls and no keys. The simulation uses a probability map of where ships can still fit.
-- **API keys**: calls the OpenAI and Anthropic APIs with the keys in `.env`.
+- **CLIs**: real models through the tools already signed in on this machine, with no API keys. The orange fleet plays through the **Claude Code CLI** (`claude -p`) and the blue fleet through the **Codex SDK** (`@openai/codex-sdk`, driving your Codex CLI). Each fleet also gets a *Reasoning effort* menu.
+- **API keys**: calls the OpenAI and Anthropic APIs with the keys in `.env`. Each fleet gets *Reasoning effort* and, on models that have it, *Speed* (Fast) menus.
 
-The model lists are in `MODELS` in `players.py`. Check the IDs against your provider's model list before connecting keys.
+### The CLIs connection
+
+**Where the menus come from.** The menus are read from the tools themselves when the setup screen loads, and refreshed every ten minutes:
+- **Codex:** the Codex model list comes from Codex's own catalog (`codex debug models`). It includes each model's supported reasoning efforts and its default.
+- **Claude, models:** Claude Code has no command that lists models, so the Claude list is the current models (Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.1), plus any extra model Claude Code has offered your account.
+- **Claude, efforts:** the levels come from `claude --help`. *Model default* sends no `--effort` flag. If a model doesn't support the level you pick, Claude Code uses the nearest level it does.
+
+**How each move runs.** Every move is one self-contained turn:
+- **Claude:** runs with its tools off, no MCP servers, no slash commands and no saved session.
+- **Codex:** runs in a read-only sandbox, in an empty temporary folder, with network and web search off.
+- **Both:** must answer in a JSON schema (the cell, or each ship's start and direction) with one sentence of reasoning, which appears under the board. Codex keeps a record of each turn in `~/.codex/sessions`, as it does for every run.
+
+**If something is missing.** If a tool is missing or not signed in, its fleet shows *Not available* and the setup screen says what to install.
+
+**Slow moves.** A move that takes longer than 15 minutes stops with an error. Set `CLI_TIMEOUT` (in seconds) to change that. Deep efforts such as *Max* or *Ultra* can take minutes per move.
+
+### The API keys connection
+
+**Where the keys go.** Copy `.env.example` to `.env` in the project folder (next to `app.py`) and fill in:
+```bash
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+```
+Then reload the page; no restart is needed. A side whose key is missing or rejected shows *Not available*, and the setup screen says which key to add. `.env` is in `.gitignore`: never commit it.
+
+**Where the menus come from.** Like the CLIs connection, the menus are read live from the APIs and refreshed every ten minutes.
+
+Anthropic (orange fleet):
+- **Models and efforts:** the Models API (`client.models.list()`) returns each model the key can use with its capabilities. That gives the model list (models without structured output are left out), each model's effort levels and whether it takes adaptive thinking.
+- **Speed:** *Fast* is fast mode, a research preview that runs the same model at up to 2.5× the output speed at twice the price. It's offered on the models that have it: Opus 5.5, Opus 5 and Opus 4.8, or whatever the Models API reports.
+
+OpenAI (blue fleet):
+- **Models:** the Models API lists the model IDs the key can use.
+- **Efforts and speed:** these come from Codex's model catalog when Codex is installed. *Fast* is OpenAI's Priority processing (`service_tier: "priority"`), with the speed-up the catalog gives for each model (1.5× or 2×).
+- **Models Codex doesn't cover:** other current GPT models are listed with Low, Medium and High effort and no Fast tier.
+
+Neither API offers a faster tier than Fast. *Default* effort sends no effort, so the model uses its own default; for GPT models the menu shows what that is.
+
+**How each move runs.** Every move is one request: the chosen effort and speed, and strict JSON-schema output (the cell, or each ship's start and direction) with one sentence of reasoning.
+- **Claude:** Claude requests use adaptive thinking.
+- **Refusal fallback:** at standard speed, Opus 5.5, Opus 5, Sonnet 5.5 and Fable 5.1 also send Anthropic's server-side fallback (`fallbacks: "default"`). If the model declines a move on safety grounds, another model finishes the turn instead of the game stopping. Fast mode turns it off, because the fallback models don't all have fast mode.
+- **Errors:** rate limits, rejected keys and declined moves show as readable errors with a *Retry move* button.
+
+The Test mode model lists are in `MODELS` in `players.py`.
 
 ## Quickstart
 
@@ -73,12 +117,27 @@ Install the Python dependencies:
 python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
 ```
 
+For the CLIs connection, you also need:
+- the [Claude Code CLI](https://code.claude.com), signed in (run `claude` once);
+- the Codex CLI, signed in (`codex login`);
+- Node.js 18 or later.
+
+Then install the Codex SDK. The project's `.npmrc` skips the SDK's bundled Codex binary (about 350 MB) because the bridge uses your installed `codex`:
+```bash
+npm install
+```
+
 Run the app:
 ```bash
 python app.py
 ```
 
-Then open http://127.0.0.1:5001. For API mode, copy `.env.example` to `.env` and add your keys. Never commit a populated `.env` (it is in `.gitignore`). Finished API games are saved to `data/battle-history.json` and shown under *Universal stats* and *History*.
+Then open http://127.0.0.1:5001. For API mode, put your keys in `.env` (see *The API keys connection* above). Never commit a populated `.env` (it is in `.gitignore`). Finished live games (CLIs or API keys) are saved to `data/battle-history.json` and shown under *Universal stats* and *History*.
+
+The CLIs and API connections have tests with stand-ins for `claude`, `codex`, `node` and the OpenAI and Anthropic clients, so they call no model and send nothing:
+```bash
+.venv/bin/python -m unittest tests/test_cli_connection.py tests/test_api_connection.py
+```
 
 ## Controls
 
