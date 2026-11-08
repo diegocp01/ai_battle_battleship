@@ -292,7 +292,7 @@ export class Combat {
             const launcher = ship.launchers[(i + Math.floor(Math.random() * 2)) % ship.launchers.length];
             const start = ship.body.localToWorld(launcher.clone().add(new THREE.Vector3((Math.random() - .5) * .08, 0, (Math.random() - .5) * .08)));
             T.effects.vlsLaunch(start, ship.type === 'Cruiser' ? 1.1 : 1);
-            T.audio.play('missile', start, 1.3);
+            T.audio.play(ship.type === 'Cruiser' ? 'missile' : 'missileLight', start, 1.3);
             T.post.flash(.04);
             const target = i === 0 ? impact : impact.clone().add(this.straddle(context, 1)[0].multiplyScalar(.5));
             if (i > 0 && !context.victim) target.y = 0;
@@ -334,7 +334,7 @@ export class Combat {
         T.effects.splash(start.clone().setY(0), .6, {sound: false});
         T.effects.steam(start, 1);
         T.effects.vlsLaunch(start.clone().setY(.02), .7);
-        T.audio.play('missile', start, 1.1);
+        T.audio.play('subMissile', start, 1.1);
         await this.missileFlight(start, impact);
     }
 

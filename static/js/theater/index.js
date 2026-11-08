@@ -18,7 +18,7 @@ import { createSeaWall } from './wall.js';
 
 // The naval theater: a golden-hour ocean where two AI fleets deploy and trade fire. game.js drives it
 // through a small promise-based API (deploy, playShot, celebrate), and the DOM boards stay the accessible
-// source of truth. Everything visible is generated in code: sky, sea, ships, fire and sound.
+// source of truth. Sky, sea, ships and fire are generated in code; battle audio uses local recordings.
 
 export const TEAMS = {
     gpt: {id: 'gpt', name: 'GPT', color: '#3d8bff', paint: 0x838b92, superstructure: 0x939aa0, logo: '/static/img/logo-chatgpt.png'},
