@@ -378,6 +378,22 @@ export class Effects {
         }
     }
 
+    // A bow driving into the swell: sheets of spray thrown up and out to both sides of the stem, and a little
+    // mist blown back. forward: the ship's heading on the water; scale: how hard she hit the wave.
+    bowSpray(at, forward, scale = 1) {
+        const r = Math.random;
+        const side = new THREE.Vector3(-forward.z, 0, forward.x);
+        for (let i = 0; i < 9 * scale; i++) {
+            const s = r() < .5 ? -1 : 1;
+            const out = .35 + r() * .5, up = .7 + r() * .8, ahead = .1 + r() * .3;
+            const size = .012 + r() * .022;
+            this.spawn({x: at.x + side.x * s * .01, y: at.y, z: at.z + side.z * s * .01,
+                vx: (side.x * s * out + forward.x * ahead) * scale, vy: up * Math.sqrt(scale), vz: (side.z * s * out + forward.z * ahead) * scale,
+                ramp: RAMP.SPRAY, frame: FRAME.SPRAY, size, life: .7 + r() * .4, drag: .4, lift: -5, collide: true, terminal: 1.2 + size * 14, stretch: .012});
+        }
+        if (r() < .6) this.spawn({x: at.x, y: at.y + .03, z: at.z, vx: (r() - .5) * .15, vy: .12, vz: (r() - .5) * .15, ramp: RAMP.MIST, frame: FRAME.SMOKE, size: .06 + r() * .05, life: 1.2 + r() * .6, drag: 1.4, wind: .9, alpha: .6});
+    }
+
     // Run something a little later, on the effects clock (so it pauses and speeds up with the battle).
     later(seconds, fn) {
         this.pending.push({at: this.time + seconds, fn});

@@ -171,6 +171,8 @@ void main() {
         + texture2D(uReflection, reflectUv + spread * vec2(-1., -.3)).rgb * .16
         + texture2D(uReflection, reflectUv + spread * vec2(.3, -1.)).rgb * .16;
 
+    float skyLuma = dot(reflection, vec3(.2126, .7152, .0722));
+    reflection = mix(reflection, skyLuma * vec3(.82, 1., 1.04), .38);
     float cosTheta = clamp(dot(N, V), 0., 1.);
     float fresnel = .02 + .98 * pow(1. - cosTheta, 5.);
 
@@ -207,8 +209,11 @@ void main() {
     // Whitecaps, hull contact foam, wakes and sinking turbulence.
     // Small, scattered whitecaps riding the crests.
     float capField = texture2D(uFoamMap, p * .17 + uTime * vec2(.006, .003)).g + texture2D(uFoamMap, p * .61 - uTime * .004).b * .35 - .17;
-    float caps = smoothstep(.72, .9, capField + vCrest * .12) * smoothstep(-.2, .6, vCrest);
-    foam += caps * .22;
+    float caps = smoothstep(.66, .88, capField + vCrest * .16) * smoothstep(-.25, .55, vCrest);
+    foam += caps * .34;
+    // Water churned by a hull: white water torn up where the side meets the swell, and around it a band of
+    // aerated water, turquoise with bubbles, that the foam streaks out of.
+    float churned = 0., aerated = 0.;
     for (int i = 0; i < ${MAX_SHIPS}; i++) {
         vec4 s = uShips[i];
         if (s.w <= 0.) continue;
@@ -220,6 +225,23 @@ void main() {
         float capsule = length(vec2(max(abs(local.x) - (s.w - halfBeam), 0.), local.y)) - halfBeam;
         float outside = max(capsule, 0.);
         foam += exp(-outside * 38.) * smoothstep(-.03, .0, capsule) * (.28 + s2.z * .5);
+        if (s.w > 0. && s2.w < .9) {
+            // The swell slapping the side: white water that comes and goes as crests run along the hull.
+            vec2 along = vec2(local.x * 3.1 + uTime * .9, local.y * 9.);
+            float slap = texture2D(uFoamMap, along * .35 + p * .05).r * .7 + texture2D(uFoamMap, along * .9 + 4.2).r * .45;
+            float hug = exp(-outside * 26.) * smoothstep(-.02, .0, capsule);
+            // Broken by a second, coarser field so it comes in sheets and gaps rather than an even band.
+            float sheets = texture2D(uFoamMap, vec2(local.x * .9 - uTime * .07, local.y * 2.) * .4 + 7.1).g;
+            churned = max(churned, hug * smoothstep(.4, .95, slap + vCrest * .35) * smoothstep(.25, .6, sheets) * (1. - s2.w));
+            aerated = max(aerated, exp(-outside * 7.) * smoothstep(-.02, .0, capsule) * (.5 + .5 * slap) * (1. - s2.w));
+            // The bow: white water piled against the stem as she pitches into the swell, streaming back along
+            // both sides of the forward hull and breaking up as it goes.
+            float forwardPart = smoothstep(s.w * .35, s.w * .95, local.x);
+            vec2 streamUv = vec2(local.x * 1.6 - uTime * .25, abs(local.y) * 11. + outside * 6.);
+            float stream = texture2D(uFoamMap, streamUv * .5).r * .65 + texture2D(uFoamMap, streamUv * 1.3 + 2.7).r * .5;
+            float bow = forwardPart * exp(-outside * 17.) * smoothstep(-.02, .0, capsule);
+            churned = max(churned, bow * smoothstep(.3, .9, stream + forwardPart * .35 + vCrest * .3) * (1. - s2.w));
+        }
         // Under way: a turbulent band straight behind the stern, the thin arms of the Kelvin wedge, a bow wave.
         float behind = -local.x - s.w * .85;
         if (s2.y > .01 && behind > 0.) {
@@ -230,9 +252,10 @@ void main() {
             float arms = exp(-pow((abs(local.y) - behind * .34 - halfBeam * .4) / (.035 + behind * .02), 2.)) * exp(-behind * .95) * .38;
             foam += (turbulent + arms) * s2.y * 1.3;
         }
-        if (s2.y > .01) foam += exp(-max(length(local - vec2(s.w * .95, 0.)) - halfBeam * .8, 0.) * 16.) * s2.y * .9;
+        if (s2.y > .01) foam += smoothstep(s.w * .5, s.w, local.x) * exp(-outside * 14.) * smoothstep(-.03, .0, capsule) * s2.y * .7;
         foam += s2.w * exp(-outside * 7.) * .9;
     }
+    foam += churned * 1.1;
     vec2 warp = (texture2D(uFoamMap, p * .23 + uTime * .003).gb - .5) * .9;
     // The swell washing along the barrier and its floats.
     {
@@ -254,13 +277,15 @@ void main() {
     float lace = (1. - smoothstep(reach - aa, reach + aa, net)) * step(.0005, reach);
     float resolved = 1. - smoothstep(.2, .7, fwidth(webUv.x) * 17.);
     float cover = mix(smoothstep(.12, .95, amount) * .85, lace, resolved) * (1. - slick * .6);
+    float streaks = texture2D(uFoamMap, p * vec2(2.3, 2.3) + warp * .4 + uTime * vec2(.01, -.006)).r;
+    cover = max(cover, smoothstep(.15, .75, churned) * (.55 + .45 * smoothstep(.3, .7, streaks)));
     float thick = smoothstep(0., .14, reach - net);
     vec2 dome = webA.xy * .55 + webB.xy * .45;
     float lit = .62 + .5 * clamp(dot(normalize(vec3(-dome.x * .9, 1., -dome.y * .9)), sunDir), 0., 1.);
     float folds = mix(.55 + .45 * smoothstep(0., .14, webA.b), 1., 1. - thick);
     vec3 foamColor = mix(vec3(.46, .62, .74), vec3(.92, .95, .98), mix(.6, 1., thick) * folds) * (uSkyLight * 1.3 + uSunColor * (diffuse * .45 + .12) * sunlit) * mix(1., lit, resolved);
-    // Water full of bubbles glows pale under and around the foam.
-    color += vec3(.03, .085, .1) * (uSkyLight + uSunColor * .15) * clamp(amount * amount * .8, 0., .7) * (1. - cover);
+    // Water full of bubbles glows pale turquoise under and around the foam, and all along a hull.
+    color += vec3(.025, .15, .14) * (uSkyLight + uSunColor * .22) * clamp(amount * amount * .8 + aerated * .9, 0., .9) * (1. - cover);
     color = mix(color, foamColor, cover);
 
     // The two target grids, projected onto the water from above like neon light: a thin bright core on the
@@ -399,8 +424,10 @@ export class Ocean {
             uTextureMatrix: {value: this.textureMatrix},
             uSunDir: {value: env.sun},
             uSunColor: {value: env.sunColor},
-            uDeep: {value: new THREE.Color(.004, .02, .068)},
-            uScatter: {value: new THREE.Color(.0, .11, .22)},
+            // A dark slate-teal open ocean (as in the reference photographs), with green-teal light coming through
+            // the thin wave crests, rather than a saturated royal blue.
+            uDeep: {value: new THREE.Color(.011, .036, .05)},
+            uScatter: {value: new THREE.Color(.0, .14, .13)},
             uSkyLight: {value: new THREE.Color(.45, .55, .7)},
             uFogColor: {value: new THREE.Color(.6, .68, .78)},
             uFogDensity: {value: .0062},
