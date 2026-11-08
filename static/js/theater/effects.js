@@ -1101,7 +1101,7 @@ export class Effects {
         this.debris.update(dt);
         this.fireballs?.update(dt);
         this.rings.update(dt);
-        this.flotsam.update(dt, this.time);
+        this.flotsam.update(dt, this.seaTime ?? this.time);
     }
 
     assignLights(camera) {
@@ -1320,7 +1320,7 @@ class Debris {
             const previous = item.p.clone();
             item.age += dt;
             integrateDrag(item.p, item.v, dt, item.drag, -DEBRIS_GRAVITY);
-            const sea = fx.ocean.height(item.p.x, item.p.z, fx.time);
+            const sea = fx.ocean.height(item.p.x, item.p.z, fx.seaTime ?? fx.time);
             const landed = item.p.y <= sea && item.v.y < 0;
             if (landed) {
                 const fraction = THREE.MathUtils.clamp((previous.y - sea) / Math.max(1e-6, previous.y - item.p.y), 0, 1);

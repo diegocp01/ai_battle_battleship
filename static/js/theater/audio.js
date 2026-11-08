@@ -4,6 +4,8 @@ import { SOUND_BANK, soundKey, impactVoice, loadSoundBank } from './sound-bank.j
 // missile and jet roars, torpedo runs, a hull groaning as it sinks, ship horns, fireworks and the sea.
 // Every sound is placed by distance and direction from the camera; a convolution reverb gives the
 // open-ocean echo, and distant events arrive a beat after their flash.
+const TIMED_BY_BATTLE = new Set(['whistle', 'torpedo', 'jet']);
+
 export class BattleAudio {
     constructor() {
         this.ctx = null;
@@ -216,6 +218,9 @@ export class BattleAudio {
 
     play(kind, at, scale = 1, impact = {}) {
         if (!this.ctx || this.muted || this.ctx.state !== 'running') return;
+        // Sounds that last as long as something in the battle (a shell's flight, a torpedo's run, the strike)
+        // are given that length in battle seconds: stretch it to real seconds at the current pace.
+        if (TIMED_BY_BATTLE.has(kind)) scale /= this.pace || 1;
         if (this.playSample(kind, at, scale, impact)) return;
         // Distinct missile samples share the original rocket synthesis if unavailable.
         if (kind === 'missileLight' || kind === 'subMissile') kind = 'missile';

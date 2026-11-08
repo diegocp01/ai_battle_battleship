@@ -19,7 +19,8 @@ let theater = null;
 const scores = {gpt: 0, claude: 0};
 const other = (team) => (team === 'gpt' ? 'claude' : 'gpt');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const speeds = [1, 2, 4];
+// 1x is the battle's base pace; 2x is the original pace, and 8x keeps the original 4x.
+const speeds = [1, 2, 4, 8];
 const escapeHtml = (text) => String(text).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const team = (key) => `<span class="team-${key}">${escapeHtml(names[key])}</span>`;
 
@@ -412,8 +413,8 @@ function renderHistory(games, totals = {gpt: 0, claude: 0}) {
 function thinkingPause(current) {
     // Simulated players answer instantly; a short pause lets the thinking state read.
     if (current.mode !== 'test') return Promise.resolve();
-    const speed = theater ? theater.speed : 1;
-    return sleep((450 + Math.random() * 650) / speed);
+    const pace = theater ? theater.pace : 1;
+    return sleep((450 + Math.random() * 650) / pace);
 }
 
 function announceResult(player, shot) {
