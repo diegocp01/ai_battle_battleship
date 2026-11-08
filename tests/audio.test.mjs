@@ -34,7 +34,7 @@ function mockAudio() {
         linearRampToValueAtTime(...v) {events.push(['ramp', ...v]);}, setTargetAtTime(v) {this.value = v;}, cancelScheduledValues() {}});
     const node = () => ({gain: param(), playbackRate: param(), pan: param(), frequency: param(), Q: param(),
         connect(other) {return other;}, disconnect() {this.disconnected = true;},
-        start(t) {this.started = t;}, stop(t) {this.stopped = t ?? 0;}});
+        start(t, offset) {this.started = t; this.offset = offset;}, stop(t) {this.stopped = t ?? 0;}});
     const audio = new BattleAudio();
     audio.ctx = {state: 'running', currentTime: 10, createBufferSource() {const source=node(); sources.push(source); return source;},
         createGain() {const gain=node(); gains.push(gain); return gain;}, createStereoPanner: node,
@@ -146,6 +146,31 @@ test('carrier engine stays alive beyond its sample and follows the moving jet un
     assert.equal(sources[0].stopped, 40.12);
     sources[0].onended();
     assert.ok(sources[0].disconnected && filters[0].disconnected);
+});
+
+test('ten formation engines use independent phases without evicting carrier audio', () => {
+    const {audio, sources} = mockAudio();
+    audio.samples.set('jetEngine', {duration:8});
+    audio.noise = {duration:3};
+    const carrier = audio.startLoop('jetEngine', null);
+    const cockpit = audio.startLoop('cockpitWind', null);
+    const formation = Array.from({length:10}, (_, i) => audio.startLoop('jetEngine', null, {
+        pool:'formation', phase:(i * .61803398875) % 1, level:.45,
+    }));
+    assert.equal(audio.loopVoices.size, 12);
+    assert.equal(new Set(sources.slice(2).map(s => s.offset)).size, 10);
+    assert.ok(sources.slice(2).every(s => s.offset >= 0 && s.offset < 8));
+    assert.ok(formation.every(v => v.active));
+    audio.startLoop('jetEngine', null, {pool:'formation'});
+    assert.equal(formation[0].active, false);
+    assert.ok(carrier.active && cockpit.active);
+    assert.equal(audio.loopVoices.size, 12);
+    for(let i=0;i<5;i++)audio.startLoop('jetEngine', null);
+    assert.equal(audio.loopVoices.size, 14);
+    assert.ok(formation.slice(1).every(v => v.active));
+    audio.stopLoops();
+    assert.equal(audio.loopVoices.size, 0);
+    assert.ok(sources.every(s => s.stopped > 10));
 });
 
 test('continuous flight audio survives mute, has a bounded fallback, and stops on reset', () => {

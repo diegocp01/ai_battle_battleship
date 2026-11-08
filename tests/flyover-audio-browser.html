@@ -17,17 +17,18 @@ play.onclick=async()=>{
  try{
   t.air.clear();
   const opening=t.openingFlyover(), flights=[...t.air.flights];
-  if(!t.audio.ctx && flights.some(f=>f.engine))throw Error('Created inert sound before unlock');
+  if(!t.audio.ctx && flights.some(f=>f.jets.some(j=>j.engine)))throw Error('Created inert sound before unlock');
   t.audio.unlock();t.audio.setMuted(false);document.querySelector('#mute').textContent='Mute';
   t.air.update(.001,t.time);
   await t.audio.ready;
   if(id!==run)return;
   t.air.update(.001,t.time);
-  if(flights.length!==2 || flights.some(f=>f.jets.length!==5||!f.engine?.active||!f.engine.recorded))throw Error('Missing recorded formation sound');
-  note('PASS: both five-jet formations have active v3 engine audio.');
+  if(flights.length!==2 || flights.some(f=>f.jets.length!==5||f.jets.some(j=>!j.engine?.active||!j.engine.recorded)))throw Error('Missing recorded formation sound');
+  note('PASS: all 10 jets have independent recorded v3 engine voices.');
+  if(t.audio.loopVoices.size!==10)throw Error('Expected exactly 10 formation voices');
   note('PASS: late unlock / recording load recovered.');
   await opening;if(id!==run)return;
-  if(flights.some(f=>!f.engine.active))throw Error('Engine ended before departure');
+  if(flights.some(f=>f.jets.some(j=>!j.engine.active)))throw Error('Engine ended before departure');
   note('PASS: engines continue after the opening ceremony resolves.');
   await new Promise((resolve,reject)=>{
    const started=performance.now();
@@ -38,10 +39,10 @@ play.onclick=async()=>{
    }check();
   });
   if(id!==run)return;
-  if(flights.some(f=>f.engine.active)||t.audio.loopVoices.size)throw Error('Engine survived departure');
-  note('PASS: both engine loops stop when the jets leave.');
+  if(flights.some(f=>f.jets.some(j=>j.engine.active))||t.audio.loopVoices.size)throw Error('Engine survived departure');
+  note('PASS: all 10 engine loops stop when the jets leave.');
  }catch(e){note('FAIL: '+e.message);}finally{if(id===run){play.disabled=false;reset.disabled=true;}}
 };
-reset.onclick=()=>{run++;t.air.clear();status.textContent=t.audio.loopVoices.size?'FAIL: reset left audio running':'PASS: reset stopped both formation engine loops.';play.disabled=false;reset.disabled=true;};
+reset.onclick=()=>{run++;t.air.clear();status.textContent=t.audio.loopVoices.size?'FAIL: reset left audio running':'PASS: reset stopped all 10 aircraft engine loops.';play.disabled=false;reset.disabled=true;};
 document.querySelector('#mute').onclick=e=>{t.setMuted(!t.audio.muted);e.target.textContent=t.audio.muted?'Unmute':'Mute';};
 </script></html>

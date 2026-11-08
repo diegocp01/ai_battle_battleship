@@ -284,7 +284,7 @@ export class AirTraffic {
         for (const jet of flight.jets) this.scene.remove(jet.group);
         for (const jet of flight.jets) for (const plume of jet.plumes) plume.material.dispose();
         for (const jet of flight.jets) for (const trail of jet.trails) trail.ended = true;
-        flight.engine?.stop();
+        for (const jet of flight.jets) jet.engine?.stop();
     }
 
     // A fighter of the team's, with its two plumes and (when the pass leaves them) two vapor trails, or coloured
@@ -358,7 +358,6 @@ export class AirTraffic {
         const length = curve.getLength();
         const jets = Array.from({length: count}, () => this.makeJet(team, trails, kind !== 'along', options.trailStyle));
         const flight = {kind, team, curve, length, speed, jets, burner, opening: Boolean(options.opening), d: 0};
-        flight.engine = flightEngine(this.t.audio, null, points[0]);
         this.flights.push(flight);
         return flight;
     }
@@ -411,6 +410,8 @@ export class AirTraffic {
         // Throttle: cruise on a pass, more power climbing, the burners on a burner pass or a hard pull-up.
         const throttle = flight.burner ? 1 : THREE.MathUtils.clamp(.45 + lead.climb * 3.5, .4, 1);
         const camera = this.t.camera;
+        const fade = Math.min(1, flight.d / 3, (flight.length - flight.d) / 5);
+        const presence = flight.opening ? 1.2 : 1;
         flight.jets.forEach((jet, i) => {
             // The V: each pair of wingmen further back and out, stepped down a little; each holds station with a
             // small drift of its own.
@@ -423,6 +424,24 @@ export class AirTraffic {
             jet.group.position.copy(lead.at).add(offset);
             jet.group.quaternion.copy(quaternion);
             jet.group.updateMatrixWorld();
+            // Each aircraft carries its own roar: the V's wingmen pass the listener
+            // slightly later, from different directions, with independent sample phases.
+            const voiceIndex = i + (flight.team === 'claude' ? 5 : 0);
+            jet.engine = flightEngine(this.t.audio, jet.engine, jet.group.position, voiceIndex);
+            if (jet.engine && camera) {
+                const towardListener = camera.position.clone().sub(jet.group.position).normalize();
+                const closing = lead.nose.dot(towardListener) * flight.speed;
+                const doppler = flightDoppler(closing, SOUND_SPEED);
+                // Exhaust projects aft. Keep the approaching turbine audible, then
+                // expose more low-frequency roar as the aircraft passes the camera.
+                const aft = (1 - lead.nose.dot(towardListener)) * .5;
+                const detune = 1 + ((voiceIndex * .381966) % 1 - .5) * .024;
+                jet.engine.update(jet.group.position, {
+                    level: .45 * fade * presence * (.55 + .45 * throttle) * (.75 + .25 * aft),
+                    rate: .82 * doppler * detune,
+                    cutoff: (2600 + 3400 * throttle) * (1 - .22 * aft),
+                });
+            }
             for (const plume of jet.plumes) {
                 const u = plume.material.uniforms;
                 u.uThrottle.value += (throttle - u.uThrottle.value) * Math.min(1, dt * 2);
@@ -431,17 +450,6 @@ export class AirTraffic {
             }
             jet.trails.forEach((trail, k) => trail.add(jet.group.localToWorld(jet.sources[k].clone().add(new THREE.Vector3(-.03, 0, 0))), this.clock));
         });
-        // Recover a late audio unlock/decode while the formation is still visible.
-        flight.engine = flightEngine(this.t.audio, flight.engine, lead.at);
-        // The roar, Doppler-shifted by how fast the lead closes on the camera.
-        if (flight.engine && camera) {
-            const velocity = lead.nose.clone().multiplyScalar(flight.speed);
-            const closing = velocity.dot(camera.position.clone().sub(lead.at).normalize());
-            const doppler = flightDoppler(closing, SOUND_SPEED);
-            const fade = Math.min(1, flight.d / 3, (flight.length - flight.d) / 5);
-            const presence = flight.opening ? 1.2 : 1;
-            flight.engine.update(lead.at, {level: fade * presence * (.55 + .45 * throttle) * Math.min(1, flight.jets.length / 3 + .4), rate: .82 * doppler, cutoff: 2600 + 3400 * throttle});
-        }
         return true;
     }
 

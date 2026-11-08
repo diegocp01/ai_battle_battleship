@@ -17,8 +17,9 @@ test('opening-speed approach stays above neutral pitch and transitions continuou
 });
 
 test('a formation started before unlock recovers and upgrades its fallback once', () => {
-    const audio={ctx:null, samples:new Map(), starts:0, startLoop(kind, at) {
+    const audio={ctx:null, samples:new Map(), starts:0, startLoop(kind, at, options) {
         this.starts++; assert.equal(kind,'jetEngine'); assert.equal(at.x,3);
+        assert.equal(options.pool,'formation');
         return {active:true, recorded:this.samples.has(kind), stop(){this.active=false;}};
     }};
     let voice=flightEngine(audio,null,{x:3});
