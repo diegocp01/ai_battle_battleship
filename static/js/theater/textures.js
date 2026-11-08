@@ -618,9 +618,31 @@ const SHIP_ICONS = {
     Submarine: [27, 'M2.5 8.5C2.5 7 4.5 6.2 7.5 6.2H21.5C24 6.2 25.5 7.2 25.5 8.5S24 10.8 21.5 10.8H7.5C4.5 10.8 2.5 10 2.5 8.5ZM9.5 6.2V3.2H13.5L14.5 6.2'],
     Destroyer: [18, 'M1.5 7H16.5M2 7 3.5 10.5H14.5L16.5 7M6 7V4.5H8.5V2H9.5V4.5H12V7'],
 };
-export const LEGEND_SIZE = [2048, 400];
+export const LEGEND_SIZE = [2048, 500];
 
-export function drawLegend(context, {fleet = [], text = '', color = '#ffffff'}) {
+// Words wrapped to at most `max` lines of the given width; the last line ends in an ellipsis if text was left over.
+function wrapLines(context, text, width, max) {
+    const words = String(text || '').split(/\s+/).filter(Boolean);
+    const lines = [];
+    let line = '';
+    for (const word of words) {
+        const next = line ? line + ' ' + word : word;
+        if (context.measureText(next).width > width && line) {
+            lines.push(line);
+            line = word;
+            if (lines.length === max) break;
+        } else line = next;
+    }
+    if (lines.length < max && line) lines.push(line);
+    if (lines.length === max && words.join(' ').length > lines.join(' ').length) {
+        let last = lines[max - 1];
+        while (context.measureText(last + '…').width > width && last.length) last = last.slice(0, -1);
+        lines[max - 1] = last.trimEnd() + '…';
+    }
+    return lines;
+}
+
+export function drawLegend(context, {fleet = [], text = '', notes = '', color = '#ffffff'}) {
     const [width, height] = LEGEND_SIZE;
     context.clearRect(0, 0, width, height);
     context.save();
@@ -653,24 +675,15 @@ export function drawLegend(context, {fleet = [], text = '', color = '#ffffff'}) 
     context.fillStyle = 'rgba(244, 247, 252, .96)';
     context.textAlign = 'center';
     context.textBaseline = 'top';
-    const words = String(text || '').split(/\s+/).filter(Boolean);
-    const lines = [];
-    let line = '';
-    for (const word of words) {
-        const next = line ? line + ' ' + word : word;
-        if (context.measureText(next).width > width - 80 && line) {
-            lines.push(line);
-            line = word;
-            if (lines.length === 3) break;
-        } else line = next;
-    }
-    if (lines.length < 3 && line) lines.push(line);
-    if (lines.length === 3 && words.join(' ').length > lines.join(' ').length) {
-        let last = lines[2];
-        while (context.measureText(last + '…').width > width - 80 && last.length) last = last.slice(0, -1);
-        lines[2] = last.trimEnd() + '…';
-    }
+    const lines = wrapLines(context, text, width - 80, 3);
     lines.forEach((l, i) => context.fillText(l, width / 2, 130 + i * 70));
+    // The model's notes to itself (the plan it carries from turn to turn), smaller and dimmer beneath.
+    if (notes) {
+        context.font = 'italic 400 42px -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif';
+        context.fillStyle = 'rgba(214, 224, 238, .78)';
+        const top = 130 + lines.length * 70 + 18;
+        wrapLines(context, 'Plan: ' + notes, width - 160, 2).forEach((l, i) => context.fillText(l, width / 2, top + i * 52));
+    }
     context.restore();
 }
 

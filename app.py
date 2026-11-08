@@ -143,6 +143,7 @@ def client_state(state, started=True):
             'sunk': list(player['sunk']),
             'shots': shots,
             'reasoning': player['reasoning'][:700],
+            'notes': player.get('notes', ''),
             'last_time': round(player['last_time'], 2),
             'total_time': round(player['total_time'], 2),
             'stats': {'shots': len(shots), 'hits': hits, 'sunk': sum(1 for shot in shots if shot['result'] == 'sunk')},
@@ -268,7 +269,7 @@ def place_ships():
         seat['ships'] = fleet
         seat['reasoning'] = reasoning or 'Fleet deployed.'
         # The match memory begins here: the fleet as placed and the plan behind it come back in every shot prompt.
-        seat['plan'] = (reasoning or '')[:300]
+        seat['plan'] = reasoning or ''
         seat['last_time'] = elapsed
         seat['total_time'] += elapsed
         if all(state['players'][key]['ships'] for key in PLAYERS):
@@ -314,7 +315,7 @@ def next_move():
             return jsonify({'error': f"{shooter['name']} fired at {requested or repr(target)[:16]}, {problem}. The turn was not played; retry the move."}), 502
         target = requested
         result, ship = fire(defender, target)
-        shot = {'turn': turn, 'target': target, 'result': result, 'ship': ship, 'why': (reasoning or '')[:300]}
+        shot = {'turn': turn, 'target': target, 'result': result, 'ship': ship, 'why': reasoning or ''}
         shooter['shots'].append(shot)
         # The player's memory for its next turn: its notes replace the old ones (kept if it wrote none).
         if notes:

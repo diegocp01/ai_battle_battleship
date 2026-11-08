@@ -196,9 +196,10 @@ def fire_prompt(shooter, info, turn):
     # time, and the notes it left itself last turn. It starts empty with every new match.
     def entry(shot):
         result = f"SUNK the {shot['ship']}" if shot['result'] == 'sunk' else shot['result'].upper()
-        why = (shot.get('why') or '').strip()
-        if len(why) > 140:
-            why = why[:137].rstrip() + '...'
+        # The reason as it gave it (it was asked to keep it to 150 characters; longer ones end at a whole word).
+        why = ' '.join((shot.get('why') or '').split())
+        if len(why) > 160:
+            why = why[:159].rsplit(' ', 1)[0].rstrip(' ,;:') + '…'
         return f"Turn {shot['turn']}: {shot['target']} → {result}" + (f' (you thought: "{why}")' if why else '')
     history = '\n'.join(entry(shot) for shot in shooter['shots']) or 'No shots yet. This is your first shot.'
     notes = (shooter.get('notes') or '').strip() or 'None yet.'
@@ -223,6 +224,7 @@ Legend: X = hit on a ship still afloat, # = part of a sunk ship, O = miss, . = n
 
 ENEMY SHIPS STILL AFLOAT: {afloat}
 ENEMY SHIPS SUNK: {sunk}
+SCORE: you have sunk {len(info['sunk'])} of the enemy's 5 ships; the enemy has sunk {len(shooter['sunk'])} of your 5.
 
 YOUR MEMORY OF THIS MATCH
 Your fleet, as you placed it at the start of the match, and what the enemy has done to it:
@@ -236,5 +238,6 @@ Your notes from your last turn:
 
 CELLS ALREADY FIRED AT (never repeat these): {fired}
 
-Choose ONE new cell to fire at, like E5 or J10, give a one-sentence explanation, and write your updated notes to
-yourself (what you know about the enemy fleet and your plan) for your next turns."""
+Choose ONE new cell to fire at, like E5 or J10, give a one-sentence explanation (at most 150 characters), and
+write your updated notes to yourself (what you know about the enemy fleet and your plan, at most 600 characters)
+for your next turns."""

@@ -230,6 +230,7 @@ function renderPlayers(current) {
         legends[key] = {
             fleet: Object.keys(SHIPS).map(type => ({type, sunk: Boolean(fleet.get(type)?.sunk), damaged: Boolean(fleet.get(type)?.hits.length)})),
             text: player.reasoning || 'No moves yet.',
+            notes: player.notes || '',
         };
         for (const pip of $(key + '-pips').children) {
             const ship = fleet.get(pip.dataset.ship);
