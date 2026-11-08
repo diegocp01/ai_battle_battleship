@@ -305,7 +305,7 @@ export function railGeometry(spec, s0, s1, height = .016) {
 
 // Paint wear, rust streaks, waterline bands, the team's hull stripe and number, and scorch marks that
 // spread (and glow) where the ship has been hit. All in the ship's own frame, so the marks ride with it.
-function weathering(material, shared, ship, {hull = false, rust = .5, ember = true, plates = false} = {}) {
+function weathering(material, shared, ship, {hull = false, rust = .5, ember = true, plates = false, cut = false} = {}) {
     material.onBeforeCompile = (shader) => {
         Object.assign(shader.uniforms, {
             uGrime: shared.grime,
@@ -328,7 +328,7 @@ function weathering(material, shared, ship, {hull = false, rust = .5, ember = tr
                 vShipNormal = normalize(mat3(toShip) * objectNormal);`);
         shader.fragmentShader = shader.fragmentShader
             .replace('#include <common>', `#include <common>
-                uniform sampler2D uGrime; uniform float uTime; uniform vec4 uBurn[6]; uniform vec4 uHoles[8]; uniform float uRust;
+                uniform sampler2D uGrime; uniform float uTime; uniform vec4 uBurn[6]; uniform vec4 uHoles[12]; uniform float uRust;
                 float shipBent;
                 float shipHash(vec3 p) { p = fract(p * .1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
                 float shipNoise(vec3 p) {
@@ -404,14 +404,14 @@ function weathering(material, shared, ship, {hull = false, rust = .5, ember = tr
                 // steel bent outward and stripped of paint.
                 shipBent = 0.;
                 float shipHole = 0.;
-                for (int i = 0; i < 8; i++) {
+                for (int i = 0; i < 12; i++) {
                     vec4 h = uHoles[i];
                     if (h.w <= 0.) continue;
                     float d = length(vShipPos - h.xyz) / h.w + (shipNoise(vShipPos * 160.) - .5) * .55 + (shipNoise(vShipPos * 47.) - .5) * .35;
                     shipHole = max(shipHole, 1. - smoothstep(.36, .42, d));
                     shipBent = max(shipBent, 1. - smoothstep(.4, 1.05, d));
                 }
-                ${hull ? 'if (shipHole > .5 && gl_FrontFacing) discard;' : ''}
+                ${hull || cut ? 'if (shipHole > .5 && gl_FrontFacing) discard;' : ''}
                 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(.02, .018, .016), max(shipHole, shipBent * .7));
                 if (!gl_FrontFacing) diffuseColor.rgb = vec3(.025, .02, .018);`)
             .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
@@ -426,7 +426,7 @@ function weathering(material, shared, ship, {hull = false, rust = .5, ember = tr
                 float emberPulse = .55 + .45 * sin(uTime * 3.1 + shipNoise(vShipPos * 9.) * 18.);
                 totalEmissiveRadiance += vec3(1., .32, .06) * pow(shipBurn, 4.) * smoothstep(.62, .82, emberField) * smoothstep(.75, .95, vein) * emberPulse * 3.;` : ''}`);
     };
-    material.customProgramCacheKey = () => (hull ? 'ship-hull' : 'ship-paint') + (ember ? '-e' : '') + (plates ? '-p' : '');
+    material.customProgramCacheKey = () => (hull ? 'ship-hull' : 'ship-paint') + (ember ? '-e' : '') + (plates ? '-p' : '') + (cut ? '-c' : '');
     return material;
 }
 
@@ -440,7 +440,7 @@ export function shipMaterials(shared, ship, textures) {
     const mats = {
         hull: weathering(paint(ship.paint, .6, .05, {side: THREE.DoubleSide}), shared, ship, {hull: true, rust: .65, plates: true}),
         steel: weathering(paint(ship.superstructure, .62, .05), shared, ship, {rust: .4, plates: true}),
-        deck: weathering(paint(0xffffff, .85, .02, {map: textures.deck}), shared, ship, {rust: .1}),
+        deck: weathering(paint(0xffffff, .85, .02, {map: textures.deck, side: THREE.DoubleSide}), shared, ship, {rust: .1, cut: true}),
         dark: weathering(paint(0x2c2f33, .52, .35), shared, ship, {rust: .2}),
         black: paint(0x0d0e10, .7, .1),
         glass: new THREE.MeshPhysicalMaterial({color: 0x0a1016, roughness: .06, metalness: .1, clearcoat: 1, clearcoatRoughness: .05, envMapIntensity: 1.1}),

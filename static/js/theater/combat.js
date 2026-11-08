@@ -192,8 +192,13 @@ export class Combat {
                 T.effects.pop(at, .32, false);
             }
             victim.burningCells.add(shot.target);
-            T.effects.addFire(anchor, (FIRE_BY_WEAPON[kind] ?? 1) * (FIRE_BY_SHIP[victim.type] ?? 1));
+            const fireScale = (FIRE_BY_WEAPON[kind] ?? 1) * (FIRE_BY_SHIP[victim.type] ?? 1);
+            T.effects.addFire(anchor, fireScale);
             T.effects.scar(anchor, size * (context.waterline ? .7 : 1));
+            // A warhead or the strike jet amidships tears the side open on the side it came in from, and the fire
+            // burns out of the gash.
+            const tears = kind === 'missile' || kind === 'subMissile' || kind === 'strike' || (kind === 'salvo' && Math.random() < .5);
+            if (tears && !context.waterline) this.tearOpen(victim, local, impact, size, fireScale);
             T.grid.markHit(defender, shot.target);
             T.director.impact(impact, shot.result);
             T.post.flash(.12);
@@ -203,6 +208,37 @@ export class Combat {
         if (shot.result === 'sunk') await this.sinkSequence(victim, defender);
         else await T.wait(victim ? 1.8 : 1.05);
         T.director.endShot(.15);
+    }
+
+    // The side torn open by a heavy hit: the gash in the hull, a second blast out of it, the fire inside, steel
+    // peeled outward around it, scorching down the side, and burning fuel on the sea below for a fuel-rich hit.
+    tearOpen(victim, local, impact, size, fireScale) {
+        const T = this.t;
+        victim.root.updateMatrixWorld(true);
+        // The side facing the way the round came in (from its velocity, in the ship's frame).
+        let side = Math.sign(local.z) || 1;
+        const v = this.lastArrival?.velocity;
+        if (v) {
+            const a = victim.body.worldToLocal(impact.clone()), b = victim.body.worldToLocal(impact.clone().add(v));
+            if (Math.abs(b.z - a.z) > 1e-4) side = -Math.sign(b.z - a.z);
+        }
+        const gash = victim.tearSide(local.x, side, size);
+        if (!gash) return;
+        const node = new THREE.Object3D();
+        node.position.set(gash.x, gash.y - gash.radius * .2, gash.z * .8);
+        victim.attach(node);
+        victim.root.updateMatrixWorld(true);
+        const at = node.getWorldPosition(new THREE.Vector3());
+        T.effects.later(.06, () => T.effects.pop(at, .45 * size, false));
+        T.effects.addFire(node, fireScale * .9);
+        const plates = T.effects.scar(node, size * 1.3);
+        plates.position.z = gash.z * .2 * Math.sign(gash.z);
+        plates.rotation.x = side * Math.PI / 2;
+        victim.addBurn(gash.x, gash.z, gash.radius * 2.2);
+        if (size >= 1.2) {
+            const sea = victim.body.localToWorld(new THREE.Vector3(gash.x, 0, gash.z + side * .1));
+            T.effects.spill({x: sea.x, y: 0, z: sea.z}, .45);
+        }
     }
 
     // Turn a turret onto the target and raise the guns.
