@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { rampTexture } from './textures.js';
 import { NO_REFLECTION_LAYER } from './ocean.js';
+import { DEPTH_GLSL } from './postfx.js';
 
 // Fire, smoke, spray and sparks. One instanced billboard system draws every particle in a single pass with
 // premultiplied alpha, so additive flames and lit, alpha-blended smoke mix correctly once sorted back to
@@ -64,10 +65,12 @@ attribute vec4 iB;   // frame, alpha, intensity, stretch
 attribute vec3 iVel;
 uniform sampler2D uRamp;
 uniform float uRampRows;
-uniform vec3 uCamRight;
-uniform vec3 uCamUp;
-uniform vec3 uCamForward;
 varying vec2 vUv;
+varying vec3 vRight;
+varying vec3 vUp;
+varying vec3 vForward;
+varying float vViewZ;
+varying float vSize;
 varying vec4 vColor;
 varying vec4 vParams;
 varying vec3 vWorld;
@@ -80,22 +83,32 @@ void main() {
     vec4 params = texture2D(uRamp, vec2(iA.z, (row + 1.5) / uRampRows));
     float size = iA.x * params.y * 2.;
     vec2 corner = position.xy;
+    // The camera drawing this pass (main view, mirror, or the sun's shadow camera) from its view matrix.
+    vec3 camRight = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+    vec3 camUp = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+    vec3 camForward = -vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]);
     vec3 offset;
     if (iB.w > 0.) {
         float speed = length(iVel);
-        vec3 dir = speed > 1e-4 ? iVel / speed : uCamUp;
-        vec3 along = dir - dot(dir, uCamForward) * uCamForward;
+        vec3 dir = speed > 1e-4 ? iVel / speed : camUp;
+        vec3 along = dir - dot(dir, camForward) * camForward;
         float l = length(along);
-        along = l > 1e-4 ? along / l : uCamUp;
-        vec3 side = normalize(cross(along, uCamForward));
+        along = l > 1e-4 ? along / l : camUp;
+        vec3 side = normalize(cross(along, camForward));
         offset = along * corner.y * (size + speed * iB.w) + side * corner.x * size;
     } else {
         float c = cos(iA.y), s = sin(iA.y);
         vec2 r = vec2(corner.x * c - corner.y * s, corner.x * s + corner.y * c) * size;
-        offset = uCamRight * r.x + uCamUp * r.y;
+        offset = camRight * r.x + camUp * r.y;
     }
     vWorld = iPos + offset;
-    gl_Position = projectionMatrix * viewMatrix * vec4(vWorld, 1.);
+    vec4 view = viewMatrix * vec4(vWorld, 1.);
+    gl_Position = projectionMatrix * view;
+    vViewZ = view.z;
+    vSize = size;
+    vRight = camRight;
+    vUp = camUp;
+    vForward = camForward;
     vUv = uv;
     vColor = color;
     vParams = params;
@@ -110,10 +123,16 @@ uniform sampler2D uAtlas;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform vec3 uAmbient;
-uniform vec3 uCamRight;
-uniform vec3 uCamUp;
-uniform vec3 uCamForward;
 uniform vec4 uFires[4];
+uniform sampler2D uDepth;
+uniform vec2 uScreen;
+uniform float uSoft, uNear, uFar;
+varying vec3 vRight;
+varying vec3 vUp;
+varying vec3 vForward;
+varying float vViewZ;
+varying float vSize;
+${DEPTH_GLSL}
 uniform vec3 uFireColor;
 varying vec2 vUv;
 varying vec4 vColor;
@@ -128,9 +147,17 @@ void main() {
     float additive = vParams.x;
     float alpha = tex.a * vColor.a * vAlpha;
     if (vParams.w > .5) alpha *= smoothstep(-.01, .1, vWorld.y);
+    // Soft particles: fade out as the billboard nears the surface behind it, instead of cutting a hard line
+    // where smoke meets the sea, a deck or the wall.
+    if (uSoft > .5) {
+        float sceneZ = -viewZFromDepth(texture2D(uDepth, gl_FragCoord.xy / uScreen).x, uNear, uFar);
+        alpha *= clamp((sceneZ + vViewZ) / (.02 + vSize * .45), 0., 1.);
+    }
+    // Near the lens a billboard would fill the frame as a flat card: fade it out as the camera reaches it.
+    alpha *= clamp((-vViewZ - .04) / (vSize * 1.4 + .06), 0., 1.);
     if (alpha < .002) discard;
     vec2 q = vUv * 2. - 1.;
-    vec3 n = normalize(uCamRight * q.x + uCamUp * q.y - uCamForward * sqrt(max(.05, 1. - dot(q, q))));
+    vec3 n = normalize(vRight * q.x + vUp * q.y - vForward * sqrt(max(.05, 1. - dot(q, q))));
     float wrap = pow(clamp(dot(n, uSunDir) * .5 + .5, 0., 1.), 1.5);
     vec3 lit = vColor.rgb * (uAmbient + uSunColor * wrap) * mix(.38, 1.18, tex.r);
     // Fires and blasts light the smoke around them from inside and below: the orange underside of a plume.
@@ -150,6 +177,21 @@ void main() {
     #include <colorspace_fragment>
 }
 `;
+
+// Smoke in the sun's shadow map: the dense parts of lit (not additive) particles.
+const shadowFragment = /* glsl */`
+uniform sampler2D uAtlas;
+varying vec2 vUv;
+varying vec4 vColor;
+varying vec4 vParams;
+varying float vFrame;
+varying float vAlpha;
+void main() {
+    vec2 cell = vec2(mod(vFrame, 4.), floor(vFrame / 4.));
+    float a = texture2D(uAtlas, (cell + vUv) / 4.).a * vColor.a * vAlpha * (1. - vParams.x);
+    if (a < .34) discard;
+    gl_FragColor = vec4(1.);
+}`;
 
 export class Effects {
     constructor(scene, {atlas, ocean, env, onShake, onSound}) {
@@ -182,12 +224,14 @@ export class Effects {
             uAtlas: {value: atlas},
             uRamp: {value: rampTexture(ramps)},
             uRampRows: {value: ramps.length * 2},
-            uSunDir: {value: env.sun.clone()},
-            uSunColor: {value: new THREE.Color(1, .97, .92).multiplyScalar(1.45)},
+            uSunDir: {value: env.sun},
+            uSunColor: {value: env.particleSun},
             uAmbient: {value: new THREE.Color(.3, .35, .44)},
-            uCamRight: {value: new THREE.Vector3(1, 0, 0)},
-            uCamUp: {value: new THREE.Vector3(0, 1, 0)},
-            uCamForward: {value: new THREE.Vector3(0, 0, -1)},
+            uDepth: {value: null},
+            uScreen: {value: new THREE.Vector2(1, 1)},
+            uSoft: {value: 1},
+            uNear: {value: .1},
+            uFar: {value: 9000},
             uFires: {value: Array.from({length: 4}, () => new THREE.Vector4(0, 0, 0, 0))},
             uFireColor: {value: new THREE.Color(1, .46, .16)},
         };
@@ -200,12 +244,21 @@ export class Effects {
         this.mesh.frustumCulled = false;
         this.mesh.renderOrder = 10;
         scene.add(this.mesh);
+        // A shadow-only twin on the solid layer: invisible in the view, it draws the smoke into the sun's shadow
+        // map so plumes darken the decks and the wall beneath them.
+        this.shadowCaster = new THREE.Mesh(geometry, new THREE.ShaderMaterial({vertexShader: 'void main() { gl_Position = vec4(2., 2., 2., 1.); }', fragmentShader: 'void main() { discard; }'}));
+        this.shadowCaster.customDepthMaterial = new THREE.ShaderMaterial({vertexShader, fragmentShader: shadowFragment, uniforms: this.uniforms});
+        this.shadowCaster.castShadow = true;
+        this.shadowCaster.frustumCulled = false;
+        scene.add(this.shadowCaster);
         this.order = new Uint32Array(n);
         this.depth = new Float32Array(n);
         this.fires = [];
         this.flashes = [];
         this.emitters = [];
         this.pending = [];
+        this.blasts = [];
+        this.heatSources = [];
         this.lights = Array.from({length: 6}, () => {
             const light = new THREE.PointLight(0xffaa66, 0, 0, 2);
             light.castShadow = false;
@@ -283,11 +336,33 @@ export class Effects {
         if (p.ramp[i] !== RAMP.SPRAY) return;
         const ripples = this.ocean.ripples;
         const x = p.pos[k], z = p.pos[k + 2], size = p.size[i], fall = Math.min(1, -vy / 3);
-        ripples?.push(x, z, Math.min(.7, .05 + size * 1.7) * fall, .045 + size * .22);
-        if (size > .12) ripples?.whiten(x, z, .03 + size * .3, .04 + size * .22);
+        // In proportion to the droplet's mass: a whole column falling back adds up to about the shell's own crater.
+        ripples?.push(x, z, Math.min(.04, size * .1) * fall, .045 + size * .22);
+        if (size > .12 && Math.random() < .35) ripples?.whiten(x, z, .02 + size * .2, .04 + size * .22);
         if (p.collide[i] < 1.5 && vy < -1.3 && size > .035 && Math.random() < .55) {
             const a = Math.random() * Math.PI * 2, kick = -vy * (.08 + Math.random() * .12);
             this.pendingSpawns.push({x, y: .01, z, vx: Math.cos(a) * kick, vy: -vy * (.22 + Math.random() * .2), vz: Math.sin(a) * kick, ramp: RAMP.SPRAY, frame: FRAME.SPRAY, size: Math.min(.05, size * .45), life: .35 + Math.random() * .3, drag: .3, lift: -5, collide: 2, terminal: 1.4 + size * 6, stretch: .012});
+        }
+    }
+
+    // One jet's afterburners: two white-blue cores, long orange flames with shock diamonds standing in them,
+    // riding with the jet. at: between the nozzles; back: the way the exhaust leaves; power 0..1.
+    afterburner(at, back, velocity, power, scale = 1.1, dt = 1 / 60) {
+        const r = Math.random;
+        const across = new THREE.Vector3().crossVectors(back, new THREE.Vector3(0, 1, 0));
+        if (across.lengthSq() < 1e-6) across.set(0, 0, 1);
+        across.normalize();
+        const life = Math.min(.034, dt * 1.05);
+        const ride = {vx: velocity.x, vy: velocity.y, vz: velocity.z, drag: 0};
+        for (const s of [1, -1]) {
+            const n = at.clone().addScaledVector(across, s * .0085 * scale);
+            const flicker = .85 + r() * .3;
+            this.spawn({x: n.x, y: n.y, z: n.z, ...ride, ramp: RAMP.EXHAUST, frame: FRAME.GLOW, size: .042 * scale * power * flicker, life, intensity: 1.5});
+            for (let d = 1; d <= 4; d++) {
+                const q = n.clone().addScaledVector(back, d * .016 * scale * (.6 + power * .6));
+                this.spawn({x: q.x, y: q.y, z: q.z, ...ride, ramp: RAMP.EXHAUST, frame: FRAME.GLOW, size: (.016 - d * .0022) * scale * flicker, life, intensity: (1.5 - d * .25) * power});
+            }
+            this.spawn({x: n.x, y: n.y, z: n.z, vx: velocity.x + back.x * 4 * power, vy: velocity.y + back.y * 4 * power, vz: velocity.z + back.z * 4 * power, ramp: RAMP.EXHAUST, frame: FRAME.FLAME, size: .022 * scale, life: .05, drag: 0, stretch: .025, intensity: power});
         }
     }
 
@@ -314,12 +389,14 @@ export class Effects {
         // The fireball: thrown out at blast speed and stopped by the air (high drag) at about its final radius,
         // then lifted by its own heat (buoyancy that cools away) so it rises, rolls and turns to soot.
         const radius = .2 * fb * Math.sqrt(scale);
-        for (let i = 0; i < 32 * fb * scale; i++) {
+        const fuel = blast.fuel * hull.fuel;
+        this.fireballs?.spawn({x, y: y + radius * .25, z}, radius * .8, {heat: kind === 'gun' ? .85 : 1, life: 1.6 + fuel * .6, rise: .7});
+        if (fuel > .6) this.fireballs?.spawn({x, y: y + radius * .5, z}, radius * (.85 + fuel * .25), {heat: .7, life: 2.2, rise: .9});
+        for (let i = 0; i < 20 * fb * scale; i++) {
             const dir = randomDir(.25), speed = radius * 6 * (.55 + r() * .7);
             this.spawn({x: x + dir.x * .03, y: y + dir.y * .03, z: z + dir.z * .03, vx: dir.x * speed, vy: dir.y * speed, vz: dir.z * speed, ramp: RAMP.FIRE, frame: r() < .55 ? FRAME.FLAME : FRAME.SMOKE, size: (.12 + r() * .16) * fb * scale, life: .55 + r() * .75, drag: 6, lift: 1.6, cool: .9, turb: .6, intensity: .85 + r() * .5});
         }
         // Unburned propellant and fuel: a slower, bigger, rolling ball of burning fuel that climbs as it burns.
-        const fuel = blast.fuel * hull.fuel;
         for (let i = 0; i < 26 * fuel * scale; i++) {
             const dir = randomDir(.4), speed = .3 + r() * .8;
             this.spawn({x, y: y + .04, z, vx: dir.x * speed, vy: dir.y * speed + .15, vz: dir.z * speed, ramp: r() < .55 ? RAMP.FIRE : RAMP.SMOKE_FIRE, frame: r() < .5 ? FRAME.FLAME : FRAME.SMOKE, size: (.18 + r() * .22) * scale, life: 1.1 + r() * 1.1, drag: 2.6, lift: 1, cool: 1.3, turb: .7, wind: .3, intensity: .9, delay: .03 + r() * .12});
@@ -353,7 +430,10 @@ export class Effects {
         }
         if (debris) this.debris.burst(at, Math.round(8 * scale * blast.debris), scale, Math.round(blast.burning * scale));
         this.rings.ring(at, scale * 1.15, 'water');
-        if (scale * blast.flash >= .9) this.rings.ring(at, scale * .9 * Math.sqrt(blast.flash), 'air');
+        if (scale * blast.flash >= .9) {
+            this.rings.ring(at, scale * .9 * Math.sqrt(blast.flash), 'air');
+            this.shock(at, Math.min(1.6, scale * blast.flash));
+        }
         this.ocean.addImpact(x, z, .8 * scale * blast.push);
         // A hit at the waterline throws the sea up with the fire; a submarine breach boils with steam.
         if (water || waterline || hull.steam) this.splash({x, y: 0, z}, (water ? .7 : .55) * scale, {sound: false});
@@ -366,6 +446,13 @@ export class Effects {
         }
         this.onShake(at, .5 * scale * Math.sqrt(blast.flash));
         if (sound) this.onSound('explosion', at, scale * Math.sqrt(blast.flash));
+    }
+
+    // A shock front racing out from a big blast at the speed of sound (about 4.5 squares a second), for the
+    // grade pass to bend the view through.
+    shock(at, strength = 1) {
+        this.blasts.push({at: new THREE.Vector3(at.x, at.y, at.z), t: 0, duration: .45, radius: 0, strength});
+        if (this.blasts.length > 4) this.blasts.shift();
     }
 
     // Ammunition and fuel cooking off: small blasts popping around a hit for a second or two afterwards.
@@ -383,6 +470,7 @@ export class Effects {
         const r = Math.random;
         const {x, y, z} = at;
         this.flash(at, 3.4 * scale, .22, new THREE.Color(1, .68, .38));
+        this.fireballs?.spawn(at, .13 * scale + .03, {heat: .8, life: 1.2, rise: .5});
         this.spawn({x, y: y + .02, z, ramp: RAMP.FLASH, frame: FRAME.GLOW, size: .7 * scale, life: .14, drag: 0});
         for (let i = 0; i < 16; i++) {
             const dir = randomDir(.3), speed = (.5 + r() * 1.1) * scale;
@@ -476,6 +564,7 @@ export class Effects {
             this.spawn({x, y, z, vx: (dir.x + jitter.x) * speed, vy: (dir.y + jitter.y) * speed + .1, vz: (dir.z + jitter.z) * speed, ramp: heavy ? RAMP.CORDITE : RAMP.GUNSMOKE, frame: FRAME.SMOKE, size: (.08 + r() * .14) * scale, life: (heavy ? 5 : 2.2) + r() * 2.5, drag: heavy ? 7.5 : 2.6, lift: .06, wind: 1, swirl: .35});
         }
         if (heavy) {
+            this.shock({x: x + dir.x * .15, y, z: z + dir.z * .15}, .9);
             // The 16-inch fireball: a ball of flame thrown out ahead of the muzzle.
             for (let i = 0; i < 26; i++) {
                 const speed = (2 + r() * 4) * scale * .6;
@@ -548,12 +637,20 @@ export class Effects {
                 this.spawn({x: seg.x0 + (tail.x - seg.x0) * k + (r() - .5) * .02, y: seg.y0 + (tail.y - seg.y0) * k + (r() - .5) * .02, z: seg.z0 + (tail.z - seg.z0) * k + (r() - .5) * .02, vx: back.x * .25 + (r() - .5) * spread, vy: back.y * .25 + (r() - .5) * spread, vz: back.z * .25 + (r() - .5) * spread, ramp: boost ? RAMP.LAUNCH_SMOKE : RAMP.TRAIL, frame: FRAME.SMOKE, size: (boost ? .085 : .068) + r() * .018, life: (boost ? 11 : 8) + r() * 4, drag: 1.4, lift: .1, cool: 4, wind: .9, turb: .12});
             }
         } else if (kind === 'jet') {
-            // Afterburner, a faint exhaust trail, and vortices streaming off the wingtips in hard turns.
-            const tail = at.clone().addScaledVector(back, .1);
-            this.spawn({x: tail.x, y: tail.y, z: tail.z, ramp: RAMP.EXHAUST, frame: FRAME.GLOW, size: .07, life: .06, drag: 0, intensity: 1.5});
-            this.spawn({x: tail.x, y: tail.y, z: tail.z, vx: back.x * 3, vy: back.y * 3, vz: back.z * 3, ramp: RAMP.EXHAUST, frame: FRAME.FLAME, size: .03, life: .05, drag: 0, stretch: .02, intensity: 1.2});
-            along(.05, (x, y, z) => this.spawn({x: x + back.x * .14, y, z: z + back.z * .14, ramp: RAMP.TRAIL, frame: FRAME.WISP, size: .028, life: 1.4, drag: 1, alpha: .45, wind: .4}));
+            // Twin afterburners, a faint exhaust trail, vapor over the wings and vortices off the tips in hard turns.
+            const scale = projectile?.scale || 1.1;
+            this.afterburner(at.clone().addScaledVector(back, .13 * scale), back, velocity, 1, scale, dt);
             const bank = Math.abs(projectile?.bank || 0);
+            if (bank > .7) {
+                // Condensation over the wings as they pull hard: a white sheet that flickers on the upper surfaces.
+                const up = new THREE.Vector3(0, 1, 0);
+                const across = new THREE.Vector3().crossVectors(dir, up).normalize();
+                for (let i = 0; i < 4; i++) {
+                    const s = (r() - .5) * 2;
+                    const p = at.clone().addScaledVector(across, s * .07 * scale).addScaledVector(dir, -.03 * scale + (r() - .5) * .03).add(new THREE.Vector3(0, .01 * scale, 0));
+                    this.spawn({x: p.x, y: p.y, z: p.z, vx: velocity.x * .92, vy: velocity.y * .92, vz: velocity.z * .92, ramp: RAMP.MIST, frame: FRAME.SMOKE, size: .018 + r() * .014, life: .08 + r() * .06, drag: 4, alpha: Math.min(1, (bank - .7) * 3) * .55});
+                }
+            }
             if (bank > .35) {
                 const side = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(.075);
                 along(.03, (x, y, z) => {
@@ -562,6 +659,10 @@ export class Effects {
             }
         } else if (kind === 'torpedo') {
             for (let i = 0; i < 2; i++) this.spawn({x: at.x + (r() - .5) * .05, y: .015, z: at.z + (r() - .5) * .05, vx: 0, vy: .08 + r() * .12, vz: 0, ramp: RAMP.WAKE, frame: r() < .5 ? FRAME.SPRAY : FRAME.BUBBLE, size: .05 + r() * .05, life: 1.6 + r() * .8, drag: 2, lift: -.1});
+        } else if (kind === 'flare') {
+            // A decoy flare: a white-hot magnesium point and the thick white smoke it leaves.
+            this.spawn({x: at.x, y: at.y, z: at.z, vx: velocity.x, vy: velocity.y, vz: velocity.z, ramp: RAMP.FLASH, frame: FRAME.GLOW, size: .07, life: Math.min(.034, dt * 1.05), drag: 0, intensity: 1.6});
+            along(.02, (x, y, z) => this.spawn({x, y, z, vx: (r() - .5) * .04, vy: (r() - .5) * .04, vz: (r() - .5) * .04, ramp: RAMP.TRAIL, frame: FRAME.SMOKE, size: .025 + r() * .015, life: 3 + r() * 2, drag: 1.2, lift: .05, wind: .7, turb: .3, alpha: .75}));
         } else if (kind === 'bomb') {
             // Air streaming off the fins as it falls.
             along(.05, (x, y, z) => this.spawn({x, y, z, ramp: RAMP.GUNSMOKE, frame: FRAME.WISP, size: .016, life: .45, drag: 2, alpha: .35}));
@@ -648,7 +749,9 @@ export class Effects {
         for (const fire of this.fires) if (fire.owned) this.scene.remove(fire.anchor);
         this.fires = [];
         this.pending = [];
+        this.blasts = [];
         this.flashes = [];
+        this.fireballs?.clear();
         this.debris.clear();
         this.flotsam.clear();
     }
@@ -720,11 +823,17 @@ export class Effects {
             }
         }
         this.fires = this.fires.filter(f => f.alive);
+        for (const blast of this.blasts) {
+            blast.t += dt;
+            blast.radius = blast.t * 4.5;
+        }
+        this.blasts = this.blasts.filter(b => b.t < b.duration);
         for (const flash of this.flashes) flash.t += dt;
         this.flashes = this.flashes.filter(f => f.t < f.duration);
         this.assignLights(camera);
         this.simulate(dt, camera);
         this.debris.update(dt);
+        this.fireballs?.update(dt);
         this.rings.update(dt);
         this.flotsam.update(dt, this.time);
     }
@@ -849,11 +958,6 @@ export class Effects {
             attribute.needsUpdate = true;
         }
         this.mesh.geometry.instanceCount = n;
-        // Billboard basis.
-        const m = camera.matrixWorld.elements;
-        this.uniforms.uCamRight.value.set(m[0], m[1], m[2]).normalize();
-        this.uniforms.uCamUp.value.set(m[4], m[5], m[6]).normalize();
-        this.uniforms.uCamForward.value.set(-m[8], -m[9], -m[10]).normalize();
     }
 }
 
@@ -1008,7 +1112,7 @@ class Shockwaves {
         item.duration = kind === 'water' ? 1.1 + scale * .4 : .45;
         item.size = (kind === 'water' ? 2.4 : 1.8) * scale;
         item.mesh.position.set(at.x, kind === 'water' ? .02 : at.y, at.z);
-        item.mesh.material.uniforms.uStrength.value = kind === 'water' ? .22 : .22;
+        item.mesh.material.uniforms.uStrength.value = kind === 'water' ? .22 : .08;
         item.mesh.visible = true;
     }
 

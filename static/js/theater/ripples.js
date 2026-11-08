@@ -135,7 +135,7 @@ void main() {
     float hE = texture2D(uWaves, vUv + vec2(uTexel.x, 0.)).r, hW = texture2D(uWaves, vUv - vec2(uTexel.x, 0.)).r;
     float hN = texture2D(uWaves, vUv + vec2(0., uTexel.y)).r, hS = texture2D(uWaves, vUv - vec2(0., uTexel.y)).r;
     float steep = length(vec2(hE - hW, hN - hS)) / (2. * ${CELL.toFixed(5)});
-    foam += smoothstep(.3, .75, steep) * uDt * 1.5;
+    foam += smoothstep(.35, .9, steep) * uDt * 1.2 * (1. - smoothstep(.3, .8, foam));
     // White water arrives torn and uneven: its edge wanders and it lands in clots, never as a clean disc.
     float torn = noise(p * 5.3) * .62 + noise(p * 14.7) * .38;
     for (int i = 0; i < ${MAX_SPLATS}; i++) {
@@ -177,7 +177,7 @@ export class Ripples {
         this.hulls2 = hulls2;
         this.simMaterial = new THREE.ShaderMaterial({
             vertexShader: VERTEX, fragmentShader: SIM, depthTest: false, depthWrite: false,
-            uniforms: {uPrev: {value: null}, uSplats: {value: vec4s()}, uSplatCount: {value: 0}, uDt: {value: 1 / 60}, uDamping: {value: .18}, uBounds: {value: bounds}, uHulls: {value: hulls}, uHulls2: {value: hulls2}},
+            uniforms: {uPrev: {value: null}, uSplats: {value: vec4s()}, uSplatCount: {value: 0}, uDt: {value: 1 / 60}, uDamping: {value: .3}, uBounds: {value: bounds}, uHulls: {value: hulls}, uHulls2: {value: hulls2}},
         });
         this.foamMaterial = new THREE.ShaderMaterial({
             vertexShader: VERTEX, fragmentShader: FOAM, depthTest: false, depthWrite: false,
@@ -261,8 +261,10 @@ export class Ripples {
             for (const item of due) this.whiten(item.x, item.z, item.amount, .05, item.radius, .05 + item.radius * .12);
         }
         const previous = this.renderer.getRenderTarget();
-        // Fixed substeps keep the waves the same at any frame rate or battle speed.
-        const steps = Math.min(4, Math.max(1, Math.round(dt / (1 / 60))));
+        // Substeps of at most 1/60 s keep the waves the same at any frame rate or battle speed. The explicit wave
+        // step is only stable below about 1/20 s: a long frame at 4× speed (0.25 s) taken in four steps blew the
+        // field up, so a long frame takes as many short steps as it needs.
+        const steps = Math.min(16, Math.max(1, Math.ceil(dt / (1 / 60) - 1e-6)));
         const h = dt / steps;
         const sim = this.simMaterial.uniforms;
         for (let i = 0; i < steps; i++) {

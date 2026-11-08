@@ -183,10 +183,12 @@ export function ewArrays(b, {x, y, halfBeam}) {
 // Deck aircraft
 // ---------------------------------------------------------------------------------------------------------
 
-// F/A-18 Super Hornet: fuselage, swept wings, tailplanes, canted twin fins, canopy.
+// F/A-18 Super Hornet (18 m): radome and fuselage, the leading-edge extensions running forward to the cockpit,
+// the square intakes under them, swept wings with pylons, fuel tanks and wingtip Sidewinders, all-moving
+// tailplanes, canted twin fins, the bubble canopy and two engine nozzles.
 export function hornet(s = 1) {
-    const body = lathe([[.11, 0], [.09, .006], [.06, .011], [.02, .015], [-.04, .016], [-.085, .014], [-.105, .01], [-.11, .004]].map(([x, r]) => [x * s, r * s]), 14);
-    place(body, [0, 0, 0], [0, 0, 0], [1, .72, 1.18]);
+    const body = lathe([[.118, 0], [.106, .004], [.09, .008], [.07, .0105], [.04, .0135], [.0, .0155], [-.05, .016], [-.085, .0145], [-.105, .0115], [-.114, .009]].map(([x, r]) => [x * s, r * s]), 18);
+    place(body, [0, 0, 0], [0, 0, 0], [1, .72, 1.22]);
     const wing = (points, y, thickness = .003) => place(extrudeXZ(points.map(([x, z]) => [x * s, z * s]), thickness * s), [0, y * s, 0]);
     const wings = wing([[.02, 0], [-.035, .072], [-.06, .072], [-.05, 0], [-.06, -.072], [-.035, -.072]], -.002);
     const tailplane = wing([[-.07, 0], [-.095, .04], [-.112, .04], [-.108, 0], [-.112, -.04], [-.095, -.04]], -.001);
@@ -194,8 +196,22 @@ export function hornet(s = 1) {
         [[-.11 * s, -.002 * s], [-.075 * s, -.002 * s], [-.075 * s, .002 * s], [-.11 * s, .002 * s]],
         [[-.118 * s, -.002 * s], [-.1 * s, -.002 * s], [-.1 * s, .002 * s], [-.118 * s, .002 * s]],
         .038 * s), [0, .004 * s, side * .016 * s], [side * .32, 0, 0]);
-    const canopy = place(sphere(.012 * s, 12, 8), [.055 * s, .009 * s, 0], [0, 0, 0], [2.2, .8, .9]);
-    return {gray: [body, wings, tailplane, fin(-1), fin(1)], glass: [canopy]};
+    const canopy = place(sphere(.012 * s, 14, 10), [.058 * s, .0085 * s, 0], [0, 0, 0], [2.3, .82, .85]);
+    // Leading-edge extensions: thin plates from the wing root forward along the fuselage to the cockpit.
+    const lex = wing([[.085, 0], [.03, .026], [-.005, .031], [-.005, -.031], [.03, -.026]], .0005, .0016);
+    const pieces = [body, wings, tailplane, fin(-1), fin(1), lex];
+    const dark = [];
+    for (const side of [1, -1]) {
+        // Intakes under the LEX, the engine nozzles, a pylon with a drop tank, a Sidewinder on each wingtip.
+        pieces.push(place(box(.03 * s, .009 * s, .011 * s), [.014 * s, -.0055 * s, side * .0165 * s]));
+        dark.push(place(box(.002 * s, .007 * s, .009 * s), [.03 * s, -.0055 * s, side * .0165 * s]));
+        dark.push(place(cyl(.0052 * s, .0058 * s, .014 * s, 12), [-.118 * s, 0, side * .0075 * s], [0, 0, Math.PI / 2]));
+        pieces.push(place(box(.012 * s, .005 * s, .0018 * s), [-.022 * s, -.0055 * s, side * .036 * s]));
+        pieces.push(place(new THREE.CapsuleGeometry(.0046 * s, .032 * s, 4, 10), [-.018 * s, -.0105 * s, side * .036 * s], [0, 0, Math.PI / 2]));
+        pieces.push(place(cyl(.0017 * s, .0017 * s, .05 * s, 8), [-.042 * s, -.002 * s, side * .0735 * s], [0, 0, Math.PI / 2]));
+        pieces.push(place(new THREE.ConeGeometry(.0017 * s, .006 * s, 8), [-.014 * s, -.002 * s, side * .0735 * s], [0, 0, -Math.PI / 2]));
+    }
+    return {gray: pieces, glass: [canopy], dark};
 }
 
 // E-2 Hawkeye: high wing, the big rotodome on its pylon, four small fins.
@@ -223,6 +239,20 @@ export function seahawk(s = 1) {
 export function tug(b, x, y, z, yaw = 0) {
     b.add('yellow', place(box(.03, .012, .018), [0, 0, 0], [0, yaw, 0]), [x, y + .006, z]);
     b.add('dark', place(box(.008, .008, .014), [0, 0, 0], [0, yaw, 0]), [x - Math.cos(yaw) * .006, y + .016, z + Math.sin(yaw) * .006]);
+}
+
+// A sailor, 1.8 m tall: a body in the colour of the job and a helmet or head.
+export function sailor(b, x, y, z, material) {
+    b.add(material, new THREE.CapsuleGeometry(.0036, .012, 2, 6), [x, y + .0096, z]);
+    b.add('white', sphere(.0028, 6, 4), [x, y + .0205, z]);
+}
+
+// A handful of sailors scattered round a point.
+export function crewGroup(b, x, y, z, materials, count = 3, spread = .03) {
+    for (let i = 0; i < count; i++) {
+        const a = rand() * Math.PI * 2, d = Math.sqrt(rand()) * spread;
+        sailor(b, x + Math.cos(a) * d, y, z + Math.sin(a) * d * .7, materials[Math.floor(rand() * materials.length)]);
+    }
 }
 
 export { rand };

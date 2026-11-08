@@ -4,7 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { createEnvironment } from './environment.js';
+import { createEnvironment, TIMES } from './environment.js';
 import { Ocean, NO_REFLECTION_LAYER } from './ocean.js';
 import { oceanNormalMap, foamTexture, grimeTexture, particleAtlas, vlsTexture, railTexture, flagTexture, hashString } from './textures.js';
 import { Ship } from './ships.js';
@@ -15,6 +15,9 @@ import { Director } from './director.js';
 import { Combat } from './combat.js';
 import { BattleAudio } from './audio.js';
 import { createSeaWall } from './wall.js';
+import { Fireballs } from './fireball.js';
+import { AirTraffic } from './air.js';
+import { LayerRenderPass, AmbientOcclusionPass, ShadowFocus, FX_LAYER } from './postfx.js';
 
 // The naval theater: a golden-hour ocean where two AI fleets deploy and trade fire. game.js drives it
 // through a small promise-based API (deploy, playShot, celebrate), and the DOM boards stay the accessible
@@ -29,17 +32,66 @@ const SIZES = {Carrier: 5, Battleship: 4, Cruiser: 3, Submarine: 3, Destroyer: 2
 const other = (team) => (team === 'gpt' ? 'claude' : 'gpt');
 
 const GradeShader = {
-    uniforms: {tDiffuse: {value: null}, uTime: {value: 0}, uFlash: {value: 0}, uLetterbox: {value: 0}, uResolution: {value: new THREE.Vector2(1, 1)}},
+    uniforms: {
+        tDiffuse: {value: null}, uTime: {value: 0}, uFlash: {value: 0}, uLetterbox: {value: 0}, uResolution: {value: new THREE.Vector2(1, 1)},
+        tDepth: {value: null}, uInvViewProj: {value: new THREE.Matrix4()}, uPrevViewProj: {value: new THREE.Matrix4()}, uBlur: {value: 0}, uAspect: {value: 1},
+        uHeat: {value: Array.from({length: 6}, () => new THREE.Vector4())}, uShock: {value: Array.from({length: 4}, () => new THREE.Vector4())},
+    },
     vertexShader: /* glsl */`varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
     fragmentShader: /* glsl */`
         uniform sampler2D tDiffuse; uniform float uTime; uniform float uFlash; uniform float uLetterbox; uniform vec2 uResolution;
+        uniform sampler2D tDepth; uniform mat4 uInvViewProj; uniform mat4 uPrevViewProj; uniform float uBlur; uniform float uAspect;
+        uniform vec4 uHeat[6]; uniform vec4 uShock[4];
         varying vec2 vUv;
         float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+        float vnoise(vec2 p) {
+            vec2 i = floor(p), f = fract(p);
+            f = f * f * (3. - 2. * f);
+            return mix(mix(hash(i), hash(i + vec2(1., 0.)), f.x), mix(hash(i + vec2(0., 1.)), hash(i + vec2(1.)), f.x), f.y);
+        }
+        vec3 sampleScene(vec2 uv, vec2 c, float ca) {
+            return vec3(texture2D(tDiffuse, uv + c * ca).r, texture2D(tDiffuse, uv).g, texture2D(tDiffuse, uv - c * ca).b);
+        }
         void main() {
             vec2 c = vUv - .5;
             float r2 = dot(c, c);
             float ca = .0006 * r2 * 4.;
-            vec3 color = vec3(texture2D(tDiffuse, vUv + c * ca).r, texture2D(tDiffuse, vUv).g, texture2D(tDiffuse, vUv - c * ca).b);
+            // Hot air above fires bends the light through it: a rising, wavering shimmer.
+            vec2 warp = vec2(0.);
+            for (int i = 0; i < 6; i++) {
+                vec4 h = uHeat[i];
+                if (h.w <= 0.) continue;
+                vec2 d = (vUv - h.xy) * vec2(uAspect, 1.);
+                float mask = exp(-pow(d.x / h.z, 2.)) * smoothstep(-.4 * h.z, .3 * h.z, d.y) * exp(-max(d.y, 0.) / (h.z * 3.5));
+                vec2 q = vec2(d.x, d.y - uTime * h.z * 1.6) / h.z * 2.6;
+                warp += (vec2(vnoise(q), vnoise(q + 17.3)) - .5) * mask * h.w;
+            }
+            // The shock front of a big blast: a ring of compressed air that bends the view as it races outward.
+            for (int i = 0; i < 4; i++) {
+                vec4 s = uShock[i];
+                if (s.w <= 0.) continue;
+                vec2 d = (vUv - s.xy) * vec2(uAspect, 1.);
+                float r = length(d);
+                float ring = exp(-pow((r - s.z) / (s.z * .16 + .003), 2.));
+                warp += d / max(r, 1e-4) / vec2(uAspect, 1.) * ring * s.w;
+            }
+            vec2 uv = vUv + warp;
+            vec3 color = sampleScene(uv, c, ca);
+            // Camera motion blur: where each pixel's point was last frame, smeared along that path.
+            if (uBlur > 0.) {
+                float depth = texture2D(tDepth, vUv).x;
+                vec4 world = uInvViewProj * vec4(vec3(vUv, depth) * 2. - 1., 1.);
+                world /= world.w;
+                vec4 prev = uPrevViewProj * world;
+                vec2 velocity = (vUv - (prev.xy / prev.w * .5 + .5)) * uBlur;
+                float speed = length(velocity);
+                if (speed > .025) velocity *= .025 / speed;
+                if (speed > .0007) {
+                    vec3 sum = color;
+                    for (int k = 1; k <= 6; k++) sum += sampleScene(uv - velocity * (float(k) / 6. - .5), c, ca);
+                    color = sum / 7.;
+                }
+            }
             // Gentle grade: warm highlights, cool shadows, a soft vignette and fine film grain.
             float luma = dot(color, vec3(.2126, .7152, .0722));
             color = mix(color * vec3(.96, .99, 1.04), color * vec3(1.04, 1., .95), smoothstep(.25, .8, luma));
@@ -134,8 +186,9 @@ export class Theater {
         this.ocean = new Ocean(renderer, this.env, {normalMap: this.textures.normal, foamMap: this.textures.foam, grids: [ORIGINS.gpt, ORIGINS.claude], gridColors: [TEAMS.gpt.color, TEAMS.claude.color]});
         scene.add(this.ocean.mesh);
         const sunDisc = this.env.sky.material.uniforms.showSunDisc;
-        this.ocean.beforeReflect = () => { sunDisc.value = 0; };
-        this.ocean.afterReflect = () => { sunDisc.value = 1; };
+        // The mirror pass sees no sun disc, and particles there skip the soft fade (the depth is the main view's).
+        this.ocean.beforeReflect = () => { sunDisc.value = 0; this.effects.uniforms.uSoft.value = 0; this.effects.fireballs?.setSoft(false); };
+        this.ocean.afterReflect = () => { sunDisc.value = 1; this.effects.uniforms.uSoft.value = 1; this.effects.fireballs?.setSoft(true); };
         // The concrete sea wall between the fleets: neither side can see the other's ships.
         this.wall = createSeaWall(scene);
         this.shared = sharedShipResources(this.textures.grime);
@@ -150,21 +203,33 @@ export class Theater {
         this.audio = new BattleAudio();
         this.audio.setCamera(camera);
         this.grid = new Battlefield(scene, this.ocean, {origins: ORIGINS, colors: this.colors, names: {gpt: TEAMS.gpt.name, claude: TEAMS.claude.name}});
-        this.director = new Director(camera, renderer.domElement, {bounds: {center: new THREE.Vector3(0, 0, 0), width: 23.5, depth: 10.5}});
+        // The framed area: both boards, their banners above and their legends below.
+        this.director = new Director(camera, renderer.domElement, {bounds: {center: new THREE.Vector3(0, 0, .55), width: 23.5, depth: 12.6}});
         this.effects = new Effects(scene, {
             atlas: this.textures.atlas, ocean: this.ocean, env: this.env,
             onShake: (at, strength) => this.director.addShake(at, strength),
             onSound: (kind, at, scale) => this.audio.play(kind, at, scale),
         });
+        this.effects.mesh.layers.set(FX_LAYER);
+        this.shadowFocus = new ShadowFocus(this.env.key, camera);
         this.combat = new Combat(this);
+        this.air = new AirTraffic(scene, this);
         this.director.onModeChange = (mode) => this.onCameraModeChange?.(mode);
 
         // HDR pipeline: multisampled render, bloom on fire and sun glints, ACES, then the film grade.
         const size = renderer.getDrawingBufferSize(new THREE.Vector2());
         // Retina screens need less multisampling.
         const target = new THREE.WebGLRenderTarget(Math.max(1, size.x), Math.max(1, size.y), {type: THREE.HalfFloatType, samples: (devicePixelRatio || 1) >= 1.75 ? 2 : 4});
+        // The solid scene's depth is resolved into a texture: ambient occlusion, soft particles and motion blur read it.
+        target.depthTexture = new THREE.DepthTexture(Math.max(1, size.x), Math.max(1, size.y), THREE.FloatType);
         this.composer = new EffectComposer(renderer, target);
-        this.composer.addPass(new RenderPass(scene, camera));
+        // Solid things first, then their ambient occlusion, then fire, smoke, spray and labels over them.
+        this.composer.addPass(new LayerRenderPass(scene, camera, [0]));
+        this.ao = new AmbientOcclusionPass(camera);
+        this.composer.addPass(this.ao);
+        this.effects.uniforms.uDepth = this.ao.depth;
+        this.effects.fireballs = new Fireballs(scene, {env: this.env, depth: this.ao.depth, screen: this.effects.uniforms.uScreen});
+        this.composer.addPass(new LayerRenderPass(scene, camera, [NO_REFLECTION_LAYER, FX_LAYER], {clear: false}));
         // Only fire, flashes and sun glints are bright enough to bloom; sunlit paint is not.
         this.bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), .32, .24, 3.2);
         this.composer.addPass(this.bloom);
@@ -223,34 +288,8 @@ export class Theater {
         if (this.visible && this.container.clientWidth > 0) {
             this.render();
             this.adapt(realDt);
-            this.onFrame?.();
         }
     };
-
-    // Where a board's floating tag goes on screen: off whichever edge of the board sits lowest in the view, on the
-    // water. unit is the size of one grid square there, in CSS pixels. Null when that edge is behind the camera.
-    boardAnchor(team) {
-        const center = this.grid.center(team);
-        const width = this.container.clientWidth, height = this.container.clientHeight;
-        let best = null;
-        for (const [dx, dz] of [[0, 5.6], [0, -5.6], [5.6, 0], [-5.6, 0]]) {
-            const point = this.projectPoint(center.x + dx, .05, center.z + dz, width, height);
-            if (point && (!best || point.y > best.y)) best = {...point, dx, dz};
-        }
-        if (!best) return null;
-        const along = this.projectPoint(center.x + best.dx + (best.dz ? 1 : 0), .05, center.z + best.dz + (best.dx ? 1 : 0), width, height);
-        if (!along) return null;
-        best.unit = Math.hypot(along.x - best.x, along.y - best.y);
-        return best;
-    }
-
-    projectPoint(x, y, z, width, height) {
-        const v = this.projected || (this.projected = new THREE.Vector3());
-        v.set(x, y, z).applyMatrix4(this.camera.matrixWorldInverse);
-        if (v.z > -.2) return null;
-        v.applyMatrix4(this.camera.projectionMatrix);
-        return {x: (v.x + 1) / 2 * width, y: (1 - v.y) / 2 * height};
-    }
 
     step(realDt) {
         this.realTime += realDt;
@@ -269,6 +308,15 @@ export class Theater {
             return true;
         });
         this.env.update(time);
+        // The sun's slow march across the sky over a long battle (a few degrees), and the exposure following it.
+        if (this.sunDrift && !this.attract) {
+            const drift = THREE.MathUtils.clamp(this.env.drift + this.sunDrift.rate * dt, -6, 6);
+            if (Math.abs(drift - this.sunDrift.applied) > .15) {
+                this.env.setTime(this.env.time, {drift});
+                this.sunDrift.applied = drift;
+            } else this.env.drift = drift;
+        }
+        this.renderer.toneMappingExposure += (this.env.exposure - this.renderer.toneMappingExposure) * Math.min(1, realDt * 2);
         this.ocean.update(time);
         this.wall.update(time, this.ocean);
         this.shared.time.value = time;
@@ -281,7 +329,7 @@ export class Theater {
                 const sinking = ship.state === 'sinking' ? Math.min(1, (ship.sinking?.t || 0) / 2) : ship.state === 'sunk' ? .6 : 0;
                 if (sinking && Math.random() < dt * (ship.state === 'sunk' ? 1.5 : 20)) this.effects.bubbles(ship.root.position, ship.length * .35, 1);
                 if (ship.sail && Math.random() < dt * 30) this.wake(ship);
-                shipData.push({x: ship.root.position.x, z: ship.root.position.z, heading: ship.root.rotation.y, halfLength: ship.length / 2, halfBeam: ship.beam / 2, speed: Math.max(Math.min(1, ship.speed), ship.state === 'afloat' ? .34 : 0), foam: ship.type === 'Submarine' ? 1 : .4, sinking});
+                shipData.push({x: ship.root.position.x, z: ship.root.position.z, heading: ship.root.rotation.y, halfLength: ship.length / 2, halfBeam: ship.beam / 2, speed: ship.state === 'afloat' ? Math.min(1, ship.speed) : 0, foam: ship.type === 'Submarine' ? 1 : .4, sinking});
             }
         }
         this.ocean.setShips(shipData);
@@ -297,6 +345,8 @@ export class Theater {
         this.camera.updateMatrixWorld();
         this.effects.update(dt, this.camera);
         this.grid.update(dt, time);
+        this.grid.updateLegends(this.camera);
+        this.air.update(dt, time);
         const flash = this.grade.uniforms.uFlash;
         flash.value *= Math.exp(-realDt * 9);
         const box = this.grade.uniforms.uLetterbox;
@@ -322,11 +372,58 @@ export class Theater {
     }
 
     render() {
-        // Ships move slowly: refreshing the sun's shadow map every other frame is plenty.
+        // The shadow map follows the view. Ships move slowly: refreshing it every other frame is plenty, unless
+        // the area it covers just moved.
         this.frameCount = (this.frameCount || 0) + 1;
+        const moved = this.shadowFocus.update(this.env.sun);
         this.renderer.shadowMap.autoUpdate = false;
-        this.renderer.shadowMap.needsUpdate = this.frameCount % 2 === 0;
+        this.renderer.shadowMap.needsUpdate = moved || this.frameCount % 2 === 0;
+        this.updateGradeEffects();
         this.composer.render();
+        this.prevViewProj.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+        this.prevCamera.copy(this.camera.position);
+    }
+
+    // Screen-space inputs for the grade: heat shimmer over the nearest fires, the shock rings of fresh blasts,
+    // and the matrices for camera motion blur (skipped on a cut, when the camera jumps).
+    updateGradeEffects() {
+        const u = this.grade.uniforms, camera = this.camera;
+        this.prevViewProj ??= new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+        this.prevCamera ??= camera.position.clone();
+        const viewProj = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+        u.uInvViewProj.value.copy(viewProj).invert();
+        u.uPrevViewProj.value.copy(this.prevViewProj);
+        u.tDepth.value = this.ao.depth.value;
+        const jump = camera.position.distanceTo(this.prevCamera) > Math.max(.6, camera.position.length() * .08);
+        u.uBlur.value = jump || !u.tDepth.value ? 0 : .5;
+        u.uAspect.value = camera.aspect;
+        const scale = camera.projectionMatrix.elements[5] * .5;
+        const project = (point, worldRadius) => {
+            const v = point.clone().applyMatrix4(camera.matrixWorldInverse);
+            if (v.z > -.3) return null;
+            const ndc = point.clone().project(camera);
+            if (Math.abs(ndc.x) > 1.3 || Math.abs(ndc.y) > 1.3) return null;
+            return {x: ndc.x * .5 + .5, y: ndc.y * .5 + .5, r: worldRadius * scale / -v.z, distance: -v.z};
+        };
+        const heat = u.uHeat.value;
+        const sources = this.effects.fires.filter(f => f.alive && (f.level ?? 0) > .2 && !(f.delay && f.age < f.delay))
+            .map(f => ({at: f.anchor.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, .12 + .08 * f.level, 0)), radius: .09 * Math.sqrt(f.scale * f.level), strength: Math.min(1, f.level)}))
+            .concat(this.effects.heatSources.map(source => source.get()))
+            .sort((a, b) => a.at.distanceToSquared(camera.position) - b.at.distanceToSquared(camera.position));
+        for (let i = 0; i < 6; i++) {
+            const item = sources[i];
+            const s = item && project(item.at, item.radius);
+            if (!s) { heat[i].w = 0; continue; }
+            heat[i].set(s.x, s.y, Math.max(.004, s.r), Math.min(.006, .045 * s.r) * item.strength);
+        }
+        const shock = u.uShock.value;
+        const blasts = this.effects.blasts;
+        for (let i = 0; i < 4; i++) {
+            const b = blasts[i];
+            const s = b && project(b.at, b.radius);
+            if (!s) { shock[i].w = 0; continue; }
+            shock[i].set(s.x, s.y, Math.max(.002, s.r), .012 * b.strength * (1 - b.t / b.duration));
+        }
     }
 
     // Lower the resolution if frames run long, raise it again when there is headroom.
@@ -366,6 +463,7 @@ export class Theater {
         this.bloom.resolution.set(width * ratio / 2, height * ratio / 2);
         this.ocean.setSize(width * ratio, height * ratio);
         this.grade.uniforms.uResolution.value.set(width * ratio, height * ratio);
+        this.effects.uniforms.uScreen.value.set(width * ratio, height * ratio);
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
         this.director.setAspect(width / height);
@@ -479,6 +577,7 @@ export class Theater {
                 anchor.position.set(local.x, ship.surfaceAt(local.x, local.z) + .008, local.z);
                 ship.attach(anchor);
                 ship.addBurn(local.x, local.z, .16 + ship.beam * .3);
+                ship.damage({x: local.x, y: anchor.position.y, z: local.z}, {size: 1});
                 ship.burningCells.add(shot.target);
                 this.effects.addFire(anchor, 1);
             }
@@ -526,16 +625,26 @@ export class Theater {
         this.nextDemo = 3.5;
     }
 
+    // The legends fixed on the water under each board (null hides one).
+    setLegend(team, data) {
+        this.grid?.setLegend(team, data);
+    }
+
     // The banners on the water name the models in play.
     setNames(names) {
         this.grid?.setNames(names);
     }
 
     reset() {
+        // Every battle is fought at its own time of day, and the sun moves on as it goes.
+        const times = Object.keys(TIMES);
+        this.env.setTime(times[Math.floor(Math.random() * times.length)]);
+        this.sunDrift = {rate: this.env.time === 'morning' || this.env.time === 'midday' ? .012 : -.012, applied: 0};
         this.attract = false;
         this.director.setAttract(false);
         this.combat.clear();
         this.effects.clear();
+        this.air.clear();
         this.grid.clear();
         for (const team of ['gpt', 'claude']) this.removeFleet(team);
         this.applied = {gpt: 0, claude: 0};

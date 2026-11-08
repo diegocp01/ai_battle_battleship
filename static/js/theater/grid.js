@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { labelTexture, bannerTexture } from './textures.js';
+import { labelTexture, bannerTexture, legendTexture, drawLegend, LEGEND_SIZE } from './textures.js';
 import { NO_REFLECTION_LAYER } from './ocean.js';
+import { WALL } from './wall.js';
 
 // The two battle grids: where each cell sits in the world, coordinate labels, the white marker buoys
 // dropped on every miss, and the lock-on reticle that closes in on the cell under fire.
@@ -18,6 +19,24 @@ export class Battlefield {
         scene.add(this.group);
         this.labels = [];
         for (const team of ['gpt', 'claude']) this.addLabels(team, names[team]);
+        // The legends under each board: fleet silhouettes and the latest reasoning, fixed on the water.
+        this.legends = {};
+        for (const team of ['gpt', 'claude']) {
+            const [x0, z0] = origins[team];
+            const texture = legendTexture();
+            // Hung from a point on the water just past the board's near edge, so it reads below the board and
+            // never sinks into the sea; drawn over the water, and faded out in close-ups.
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({map: texture, transparent: true, depthWrite: false, depthTest: false}));
+            const width = 8.2;
+            sprite.scale.set(width, width * LEGEND_SIZE[1] / LEGEND_SIZE[0], 1);
+            sprite.center.set(.5, 1);
+            sprite.position.set(x0 + 5, .02, z0 + 10.75);
+            sprite.layers.set(NO_REFLECTION_LAYER);
+            sprite.renderOrder = 5;
+            sprite.visible = false;
+            this.group.add(sprite);
+            this.legends[team] = {sprite, texture, key: ''};
+        }
         this.buoys = new Buoys(scene, ocean);
         this.reticle = new Reticle(scene);
     }
@@ -72,6 +91,40 @@ export class Battlefield {
             label.material.needsUpdate = true;
             label.userData.text = names[team];
         }
+    }
+
+    // Legends fade out as the camera comes close (cinematic shots, a zoomed free camera): there they would
+    // fill the frame.
+    updateLegends(camera) {
+        const c = camera.position;
+        for (const legend of Object.values(this.legends)) {
+            const p = legend.sprite.position;
+            const distance = c.distanceTo(p);
+            // Behind the barrier from here (the line of sight passes below its top): hidden, as the ships are.
+            let behind = 0;
+            if (Math.sign(c.x) !== Math.sign(p.x) && c.x !== p.x) {
+                const k = c.x / (c.x - p.x);
+                const height = c.y + (p.y + .8 - c.y) * k;
+                const z = c.z + (p.z - c.z) * k;
+                if (z > WALL.zMin && z < WALL.zMax) behind = 1 - THREE.MathUtils.smoothstep(height, WALL.copingTop - .2, WALL.copingTop + .4);
+            }
+            legend.sprite.material.opacity = THREE.MathUtils.smoothstep(distance, 6.5, 10) * (1 - behind);
+        }
+    }
+
+    // Show or update a legend: {fleet: [{type, sunk, damaged}], text}, or null to hide it.
+    setLegend(team, data) {
+        const legend = this.legends[team];
+        if (!data) {
+            legend.sprite.visible = false;
+            return;
+        }
+        legend.sprite.visible = true;
+        const key = JSON.stringify(data);
+        if (key === legend.key) return;
+        legend.key = key;
+        drawLegend(legend.texture.image.getContext('2d'), {...data, color: this.colors[team]});
+        legend.texture.needsUpdate = true;
     }
 
     setBannerVisible(visible) {

@@ -4,7 +4,7 @@ import {
     hullGeometry, hullProfile, deckGeometry, railGeometry, shipMaterials, flagMaterial, lerp,
 } from './shipkit.js';
 import { steelDeckTexture, teakDeckTexture, flightDeckTexture, hullNumberTexture } from './textures.js';
-import { windowRow, windowsAround, portholes, deckFittings, vents, raftRack, whips, roofRail, outlineRail, anchorGear, canisterLauncher, torpedoTubes, latticeMast, searchlight, ewArrays, hornet, hawkeye, seahawk, tug } from './detail.js';
+import { sailor, crewGroup, windowRow, windowsAround, portholes, deckFittings, vents, raftRack, whips, roofRail, outlineRail, anchorGear, canisterLauncher, torpedoTubes, latticeMast, searchlight, ewArrays, hornet, hawkeye, seahawk, tug } from './detail.js';
 
 // The five ships of the classic game, at their classic sizes (5, 4, 3, 3 and 2 squares), each modeled after a
 // real class and built at its real dimensions: a Ford-class carrier, an Iowa-class battleship, a
@@ -273,6 +273,7 @@ function littoral(b) {
     b.add('dark', box(.003, .045, .15), [-.9325, .07, 0]);
     deckFittings(b, P, {x0: -.85, x1: .6, spacing: .15});
     anchorGear(b, P, {x: .7, spread: .035});
+    for (const [x, z, m] of [[-.7, .06, 'crewBlue'], [-.78, -.08, 'yellow'], [.66, .05, 'crewBlue'], [-.5, .12, 'crewBlue']]) sailor(b, x, d(x), z, m);
     portholes(b, P, {x0: -.75, x1: -.39, y: .062, spacing: .06});
     portholes(b, P, {x0: -.21, x1: .5, y: .062, spacing: .06});
     vents(b, [[.53, d(.53), .06], [.53, d(.53), -.06]]);
@@ -349,6 +350,7 @@ function cruiser(b) {
     whips(b, [[.59, fy + .223, .145, .1], [.59, fy + .223, -.145, .1], [-.675, ay + .15, .085, .1], [-.675, ay + .15, -.085, .1], [-1.38, d(-1.38), .12, .07], [-1.38, d(-1.38), -.12, .07]]);
     deckFittings(b, P, {x0: -1.3, x1: 1.25, spacing: .18});
     anchorGear(b, P, {x: 1.2, spread: .045});
+    for (const [x, z] of [[1.18, .05], [-1.32, .12], [-1.36, -.1], [.08, .1], [-.12, -.12]]) sailor(b, x, d(x), z, 'crewBlue');
     portholes(b, P, {x0: -1.25, x1: .9, y: .05, spacing: .05});
     vents(b, [[.95, d(.95), .1], [.95, d(.95), -.1], [-.85, d(-.85), .12], [-.85, d(-.85), -.12], [-.15, d(-.15), .05], [.05, d(.05), -.12]]);
     parts.launchers.push(new THREE.Vector3(.83, d(.83) + .01, 0), new THREE.Vector3(-.96, d(-.96) + .01, 0));
@@ -416,6 +418,7 @@ function battleship(b) {
     roofRail(b, {x: .3, y: level + .07, w: .3, d: .27});
     roofRail(b, {x: -.45, y: level + .08, w: .18, d: .2});
     anchorGear(b, P, {x: 1.5, spread: .07});
+    for (const [x, z] of [[1.45, .06], [1.42, -.05], [-.7, .17], [-.75, -.15], [-1.6, .05], [.6, .21], [-.05, -.2]]) sailor(b, x, d(x), z, 'crewBlue');
     deckFittings(b, P, {x0: -1.85, x1: 1.75, spacing: .2});
     portholes(b, P, {x0: -1.7, x1: 1.2, y: .072, spacing: .048});
     vents(b, [[1.0, d(1.0), .16], [1.0, d(1.0), -.16], [-.9, d(-.9), .17], [-.9, d(-.9), -.17], [-1.5, d(-1.5), .1], [-1.5, d(-1.5), -.1], [1.45, d(1.45), .12], [1.45, d(1.45), -.12]]);
@@ -454,7 +457,7 @@ function deckEdge(x, side) {
 export function jetMesh(mats, scale = 1.1) {
     const pieces = hornet(scale);
     const group = new THREE.Group();
-    group.add(partMesh(mats.jet, pieces.gray), partMesh(mats.glass, pieces.glass));
+    group.add(partMesh(mats.jet, pieces.gray), partMesh(mats.glass, pieces.glass), partMesh(mats.dark, pieces.dark));
     return group;
 }
 
@@ -505,12 +508,13 @@ function carrier(b) {
     b.add('lightWhite', sphere(.0042, 8, 6), [mastTop.x, mastTop.y + .005, mastTop.z]);
     // The deck park: Super Hornets along the bow and the starboard side, Hawkeyes, Seahawks, tractors.
     const jets = hornet(.95);
-    const park = [[2.15, .14, 2.4], [1.98, .22, 2.4], [1.81, .28, 2.4], [1.64, .33, 2.4], [1.47, .36, 2.4], [1.9, -.17, -.2],
+    const park = [[2.15, .14, 2.4], [1.98, .22, 2.4], [1.81, .28, 2.4], [1.64, .33, 2.4], [1.47, .36, 2.4], [1.75, -.22, -.2],
         [-.78, .34, 2.25], [-1.0, .34, 2.25], [-1.22, .34, 2.25], [-1.44, .34, 2.25], [-1.66, .34, 2.25], [-1.88, .33, 2.25], [-2.1, .31, 2.25],
         [-.9, .19, 2.25], [-1.12, .19, 2.25], [-1.34, .19, 2.25], [-1.56, .19, 2.25], [-1.78, .18, 2.25], [1.2, .38, 2.5], [1.0, .4, 2.5]];
     for (const [x, z, yaw] of park) {
         for (const piece of jets.gray) b.add('jet', piece.clone(), [x, top + .013, z], [0, yaw, 0]);
         for (const piece of jets.glass) b.add('glass', piece.clone(), [x, top + .013, z], [0, yaw, 0]);
+        for (const piece of jets.dark) b.add('dark', piece.clone(), [x, top + .013, z], [0, yaw, 0]);
     }
     const hawk = hawkeye(1);
     for (const [x, z, yaw] of [[.3, .33, 2.6], [.6, .35, 2.6]]) {
@@ -520,6 +524,11 @@ function carrier(b) {
     const helo = seahawk(1);
     for (const [x, z, yaw] of [[-2.25, .24, 1.57], [-2.28, .07, 1.57]]) for (const piece of helo.gray) b.add('jet', piece.clone(), [x, top, z], [0, yaw, 0]);
     for (const [x, z, yaw] of [[-.66, .2, 0], [1.3, .24, .8], [-1.95, .2, 1.2], [.15, .38, 2]]) tug(b, x, top, z, yaw);
+    // The flight deck crew, in their jerseys: at the catapult, round the parked jets, by the island and the fuel.
+    const jerseys = ['yellow', 'crewPurple', 'crewGreen', 'crewRed', 'crewBrown', 'white', 'crewBlue'];
+    for (const [x, z, n] of [[1.0, -.2, 4], [1.45, .1, 3], [2.15, .1, 2], [1.75, .2, 3], [1.3, .3, 3], [.45, .24, 3], [-.15, .3, 4], [-.62, .27, 2], [-1.05, .26, 4], [-1.5, .27, 3], [-1.85, .1, 3], [-2.15, .16, 2], [.9, .3, 2]]) {
+        crewGroup(b, x, top, z, jerseys, n, .04);
+    }
     // Hangar openings under the overhang, deck-edge antennas folded outboard, sponsons with launchers and CIWS.
     for (const x of [.95, .35, -1.25]) b.add('black', box(.22, .05, .003), [x, .13, hullSide(P, x, .13) + .0016]);
     b.add('black', box(.2, .05, .003), [-.75, .13, -(hullSide(P, -.75, .13) + .0016)]);
@@ -621,6 +630,7 @@ export class Ship {
         this.uniforms = {
             inverse: {value: new THREE.Matrix4()},
             burn: {value: Array.from({length: 6}, () => new THREE.Vector4(0, 0, 0, 0))},
+            holes: {value: Array.from({length: 8}, () => new THREE.Vector4(0, 0, 0, 0))},
             teamColor: {value: new THREE.Color(team.color)},
             numberMap: {value: hullNumberTexture(CODES[team.id][type])},
             number: {value: new THREE.Vector4()},
@@ -714,6 +724,8 @@ export class Ship {
         this.cellLocal = new Map();
         this.burningCells = new Set();
         this.motion = {heave: 0, pitch: 0, roll: 0, vHeave: 0, vPitch: 0, vRoll: 0};
+        // Water taken in through the holes: a list toward the damage, trim toward the flooded end, lower in the water.
+        this.flooding = {list: 0, trim: 0, settle: 0, target: {list: 0, trim: 0, settle: 0}};
         this.sinking = null;
         this.sail = null;
         this.speed = 0;
@@ -746,6 +758,51 @@ export class Ship {
         return deckAt(this.design.profile, x / this.scale.x) * this.scale.y;
     }
 
+    // A hit tears the plating open and lets the sea in. local: the hit in the ship's frame. Returns what was
+    // wrecked (radars blown off, turrets jammed) so the battle can throw their pieces.
+    damage(local, {waterline = false, size = 1} = {}) {
+        const holes = this.uniforms.holes.value;
+        this.holeCount = (this.holeCount || 0) + 1;
+        const slot = holes.find(v => v.w <= 0) || holes[this.holeCount % holes.length];
+        const side = Math.sign(local.z) || (Math.random() < .5 ? -1 : 1);
+        const radius = (.016 + .012 * size) * Math.sqrt(this.scale.x);
+        if (waterline && this.type !== 'Submarine') {
+            // On the side, just above the waterline, where the shell went in.
+            slot.set(local.x, .02 * this.scale.y, side * this.beam * .5, radius * 1.15);
+        } else {
+            slot.set(local.x, local.y - .004, local.z, radius);
+        }
+        // Flooding: each hit lists her a few degrees toward it, more at the waterline; she settles and trims.
+        const t = this.flooding.target;
+        const per = (waterline ? .07 : .035) * (this.type === 'Carrier' ? .6 : this.type === 'Submarine' ? .5 : 1);
+        t.list = THREE.MathUtils.clamp(t.list - side * per, -.2, .2);
+        t.trim = THREE.MathUtils.clamp(t.trim - local.x / Math.max(this.length, .1) * .05, -.06, .06);
+        t.settle = Math.min(.04, t.settle + (waterline ? .009 : .005) * this.scale.y);
+        // Fittings near the hit: radar antennas are blown off, turrets jam with their barrels drooping.
+        const wrecked = [];
+        const reach = Math.max(.12, this.length * .1);
+        for (const radar of this.radars) {
+            if (!radar.object.visible) continue;
+            const p = radar.object.position;
+            if (Math.hypot(p.x - local.x, p.z - local.z) < reach) {
+                radar.object.visible = false;
+                wrecked.push(radar.object.getWorldPosition(new THREE.Vector3()));
+            }
+        }
+        for (const turret of this.turrets) {
+            if (turret.jammed) continue;
+            const p = turret.yaw.position;
+            if (Math.hypot(p.x - local.x, p.z - local.z) < reach * .8) {
+                turret.jammed = true;
+                turret.yaw.rotation.y += (Math.random() - .5) * .9;
+                turret.pitch.rotation.z = -.07;
+                turret.barrels.forEach((barrel, i) => { barrel.rotation.z = -.05 * (i + 1) * Math.random(); });
+                wrecked.push(turret.yaw.getWorldPosition(new THREE.Vector3()));
+            }
+        }
+        return wrecked;
+    }
+
     // Scorch the hull around a hit and keep the burn glowing.
     addBurn(x, z = 0, radius = .22) {
         this.burnCount = (this.burnCount || 0) + 1;
@@ -760,6 +817,7 @@ export class Ship {
         for (const slot of this.uniforms.burn.value) if (slot.target && slot.w < slot.target) slot.w = Math.min(slot.target, slot.w + dt * 1.2);
         if (this.state === 'afloat') for (const radar of this.radars) radar.object.rotation.y += radar.speed * dt;
         if (this.sail) this.updateSail(dt);
+        else if (this.home && this.state === 'afloat') this.keepStation(time, dt);
         // Ride the swell: sample the sea at bow, stern and both sides, then follow with spring damping.
         const r = this.root, cos = Math.cos(r.rotation.y), sin = Math.sin(r.rotation.y);
         const px = r.position.x, pz = r.position.z;
@@ -770,6 +828,9 @@ export class Ship {
         const pitch = Math.atan2(bow - stern, half * 2) * .9;
         const roll = Math.atan2(port - starboard, beam * 2) * .55 + Math.sin(time * .7 + this.seed) * .006;
         const m = this.motion;
+        // Flooding takes hold over several seconds as compartments fill.
+        const f = this.flooding, ease = 1 - Math.exp(-dt / 4);
+        for (const key of ['list', 'trim', 'settle']) f[key] += (f.target[key] - f[key]) * ease;
         // A damped spring toward the sea surface, integrated in small steps so any frame time stays stable.
         const steps = Math.min(30, Math.ceil(dt / (1 / 120)));
         const h = dt / Math.max(1, steps);
@@ -782,9 +843,24 @@ export class Ship {
             m.roll += m.vRoll * h;
         }
         if (!Number.isFinite(m.heave + m.pitch + m.roll + m.vHeave + m.vPitch + m.vRoll)) Object.assign(m, {heave, pitch, roll, vHeave: 0, vPitch: 0, vRoll: 0});
-        this.body.position.y = m.heave;
-        this.body.rotation.set(m.roll, 0, m.pitch);
+        this.body.position.y = m.heave - f.settle;
+        this.body.rotation.set(m.roll + f.list, 0, m.pitch + f.trim);
         if (this.sinking) this.updateSinking(dt);
+    }
+
+    // Under way at steerage speed on her own cells: a slow surge ahead and astern of her berth (at most a fifth
+    // of a square), so the hull pushes real waves into the water and trails a wake that comes and goes.
+    keepStation(time, dt) {
+        // Eases in after she arrives, so there is no jump at the berth.
+        this.stationBlend = Math.min(1, (this.stationBlend ?? 0) + dt / 8);
+        const amplitude = .2 * Math.min(1, this.length / 3) * this.stationBlend;
+        const omega = Math.PI * 2 / (64 + this.seed % 20);
+        const phase = time * omega + this.seed;
+        const offset = amplitude * Math.sin(phase);
+        const heading = this.root.rotation.y;
+        this.root.position.set(this.home.x + Math.cos(heading) * offset, this.home.y, this.home.z - Math.sin(heading) * offset);
+        // Speed through the water, for the wake (0..1 of a brisk speed).
+        this.speed = .22 + Math.abs(amplitude * omega * Math.cos(phase)) / .02 * .38;
     }
 
     // Sail in from beyond the grid edge to the berth, slowing as it arrives.
