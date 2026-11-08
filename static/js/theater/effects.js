@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { rampTexture } from './textures.js';
 import { NO_REFLECTION_LAYER } from './ocean.js';
 import { DEPTH_GLSL } from './postfx.js';
+import { shipImpactProfile, integrateDrag, DEBRIS_GRAVITY } from './impact-physics.js';
 
 // Fire, smoke, spray and sparks. One instanced billboard system draws every particle in a single pass with
 // premultiplied alpha, so additive flames and lit, alpha-blended smoke mix correctly once sorted back to
@@ -371,81 +372,78 @@ export class Effects {
         this.pending.push({at: this.time + seconds, fn});
     }
 
-    // A warhead, shell or bomb bursting on a ship. What it looks like follows what it was and what it struck (see
-    // BLASTS and HULLS). The physics is the same for all: a blinding flash; a fireball thrown out at blast speed
-    // and stopped by the air within metres, which then rises on its own heat, rolls and cools into soot; burning
-    // fragments on ballistic arcs; a shock front on the water and in the air; a column of black smoke.
-    explosion(at, scale = 1, {water = false, debris = true, sound = true, kind = 'missile', ship = null, waterline = false} = {}) {
+    // A compact pressure flash, directional ejecta, then slower fuel combustion and soot.
+    // Delayed fuzes vent through the deck; the incoming round supplies energy and momentum.
+    explosion(at, scale = 1, {water = false, debris = true, sound = true, kind = 'missile', ship = null, waterline = false, velocity, round} = {}) {
         const blast = BLASTS[kind] || BLASTS.missile;
         const hull = HULLS[ship] || HULLS.none;
+        const physics = shipImpactProfile(kind, round, velocity);
         const {x, y, z} = at;
         const r = Math.random;
-        // Armour keeps a small shell's blast outside the hull; a submarine's breach is half steam.
-        const fb = blast.fireball * (kind === 'gun' ? hull.armour : 1) * hull.fire;
-        const flash = blast.flash * scale;
-        this.flash(at, 9 * flash, .45, new THREE.Color(1, .66, .36));
-        this.spawn({x, y: y + .05, z, ramp: RAMP.FLASH, frame: FRAME.GLOW, size: .42 * scale * Math.sqrt(blast.flash), life: .14, drag: 0, intensity: .7});
-        this.spawn({x, y: y + .05, z, ramp: RAMP.FLASH, frame: FRAME.FLARE, size: .7 * scale * Math.sqrt(blast.flash), life: .09, drag: 0, rot: r() * 3, intensity: .6});
-        // The fireball: thrown out at blast speed and stopped by the air (high drag) at about its final radius,
-        // then lifted by its own heat (buoyancy that cools away) so it rises, rolls and turns to soot.
-        const radius = .2 * fb * Math.sqrt(scale);
+        const size = physics.size * Math.cbrt(scale);
+        const radius = physics.radius * Math.cbrt(scale);
         const fuel = blast.fuel * hull.fuel;
-        this.fireballs?.spawn({x, y: y + radius * .25, z}, radius * .8, {heat: kind === 'gun' ? .85 : 1, life: 1.6 + fuel * .6, rise: .7});
-        if (fuel > .6) this.fireballs?.spawn({x, y: y + radius * .5, z}, radius * (.85 + fuel * .25), {heat: .7, life: 2.2, rise: .9});
-        for (let i = 0; i < 20 * fb * scale; i++) {
-            const dir = randomDir(.25), speed = radius * 6 * (.55 + r() * .7);
-            this.spawn({x: x + dir.x * .03, y: y + dir.y * .03, z: z + dir.z * .03, vx: dir.x * speed, vy: dir.y * speed, vz: dir.z * speed, ramp: RAMP.FIRE, frame: r() < .55 ? FRAME.FLAME : FRAME.SMOKE, size: (.12 + r() * .16) * fb * scale, life: .55 + r() * .75, drag: 6, lift: 1.6, cool: .9, turb: .6, intensity: .85 + r() * .5});
+        const carry = physics.drift;
+        const wet = water || waterline || hull.steam;
+        // Contact sparks precede the internal burst, even for a delayed fuze.
+        for (let i = 0; i < Math.round(20 + 30 * size * hull.sparks); i++) {
+            const dir = randomDir(.12), speed = (.8 + r() * 2.8) * Math.sqrt(size);
+            this.spawn({x, y: y + .015, z, vx: dir.x * speed + carry.x, vy: dir.y * speed + .35, vz: dir.z * speed + carry.z, ramp: RAMP.SPARK, frame: FRAME.SPARK, size: .008 + r() * .012, life: .18 + r() * .55, drag: 1.1, lift: -DEBRIS_GRAVITY, stretch: .025, collide: true, intensity: .8});
         }
-        // Unburned propellant and fuel: a slower, bigger, rolling ball of burning fuel that climbs as it burns.
-        for (let i = 0; i < 26 * fuel * scale; i++) {
-            const dir = randomDir(.4), speed = .3 + r() * .8;
-            this.spawn({x, y: y + .04, z, vx: dir.x * speed, vy: dir.y * speed + .15, vz: dir.z * speed, ramp: r() < .55 ? RAMP.FIRE : RAMP.SMOKE_FIRE, frame: r() < .5 ? FRAME.FLAME : FRAME.SMOKE, size: (.18 + r() * .22) * scale, life: 1.1 + r() * 1.1, drag: 2.6, lift: 1, cool: 1.3, turb: .7, wind: .3, intensity: .9, delay: .03 + r() * .12});
-        }
-        // An armour-piercing shell bursts a few milliseconds inside the hull: the blast vents up through the deck
-        // as a column of flame and wreckage.
-        if (blast.vent) {
-            for (let i = 0; i < 28 * scale; i++) {
-                const a = r() * Math.PI * 2, spread = r() * .35;
-                this.spawn({x, y, z, vx: Math.cos(a) * spread, vy: 2.2 + r() * 2.6, vz: Math.sin(a) * spread, ramp: RAMP.FIRE, frame: FRAME.FLAME, size: (.09 + r() * .12) * scale, life: .45 + r() * .4, drag: 2.4, lift: 1.2, cool: .5, turb: .8, intensity: 1.1, delay: .04 + r() * .05});
+        const burst = () => {
+            this.flash(at, 5 * size, physics.flashLife, new THREE.Color(1, .78, .5));
+            this.spawn({x, y: y + .025, z, ramp: RAMP.FLASH, frame: FRAME.GLOW, size: radius * 2.6, life: physics.flashLife, drag: 0, intensity: .7});
+            // Unequal, moving lobes break the spherical silhouette. Only fuel-rich hits keep
+            // glowing after the pressure flash; smoke occupies the same cooling volume.
+            const lobes = size > .6 ? 3 : 1;
+            for (let i = 0; i < lobes; i++) {
+                const dir = randomDir(.3);
+                const reach = radius * (i ? .65 : .12);
+                const offset = {x: x + dir.x * reach, y: y + radius * .25 + dir.y * reach, z: z + dir.z * reach};
+                this.fireballs?.spawn(offset, radius * (i ? .65 : .95), {
+                    heat: i ? .75 : 1, life: .9 + fuel * .6, rise: .45 + size * .3,
+                    velocity: {x: carry.x * .3 + dir.x * radius * 2, y: dir.y * radius * 2, z: carry.z * .3 + dir.z * radius * 2},
+                    cooling: .12 + fuel * .2,
+                });
             }
-        }
-        // Black smoke climbing out of the burst on its own heat and leaning off downwind.
-        for (let i = 0; i < 18 * blast.smoke * scale; i++) {
-            const dir = randomDir(.6);
-            this.spawn({x: x + dir.x * .08 * scale, y: y + .08, z: z + dir.z * .08 * scale, vx: dir.x * .15, vy: .2 + r() * .25, vz: dir.z * .15, ramp: r() < .3 ? RAMP.SMOKE_FIRE : RAMP.SMOKE_DARK, frame: FRAME.SMOKE, size: (.26 + r() * .32) * scale, life: 9 + r() * 6, drag: 1.1, lift: .45, cool: 3, wind: 1, turb: .4, delay: .12 + r() * .6});
-        }
-        // Sparks: white-hot metal; armour sheds far more of them.
-        for (let i = 0; i < 46 * scale * hull.sparks; i++) {
-            const dir = randomDir(.15), speed = (1.8 + r() * 3.4) * scale;
-            this.spawn({x, y: y + .04, z, vx: dir.x * speed, vy: dir.y * speed + 1, vz: dir.z * speed, ramp: RAMP.SPARK, frame: FRAME.SPARK, size: .018 + r() * .02, life: .5 + r() * .9, drag: .9, lift: -4.2, stretch: .045, collide: true, intensity: .7 + r() * .6});
-        }
-        // Burning fragments on ballistic arcs, each streaking flame.
-        for (let i = 0; i < blast.rain * scale; i++) {
-            const dir = randomDir(.45), speed = (1.4 + r() * 2.2) * Math.sqrt(scale);
-            this.spawn({x, y: y + .05, z, vx: dir.x * speed, vy: dir.y * speed + .9, vz: dir.z * speed, ramp: RAMP.FIRE, frame: FRAME.FLAME, size: .04 + r() * .04, life: .9 + r() * .7, drag: .45, lift: -4.4, stretch: .03, collide: true, intensity: 1.2});
-        }
-        for (let i = 0; i < 22 * scale; i++) {
-            const dir = randomDir(.4), speed = (.4 + r() * 1.1) * scale;
-            this.spawn({x, y: y + .05, z, vx: dir.x * speed, vy: dir.y * speed + .6, vz: dir.z * speed, ramp: RAMP.EMBER, frame: FRAME.EMBER, size: .014 + r() * .016, life: 1.4 + r() * 2, drag: .8, lift: -.5, wind: .6, turb: 1.4, collide: true});
-        }
-        if (debris) this.debris.burst(at, Math.round(8 * scale * blast.debris), scale, Math.round(blast.burning * scale));
-        this.rings.ring(at, scale * 1.15, 'water');
-        if (scale * blast.flash >= .9) {
-            this.rings.ring(at, scale * .9 * Math.sqrt(blast.flash), 'air');
-            this.shock(at, Math.min(1.6, scale * blast.flash));
-        }
-        this.ocean.addImpact(x, z, .8 * scale * blast.push);
-        // A hit at the waterline throws the sea up with the fire; a submarine breach boils with steam.
-        if (water || waterline || hull.steam) this.splash({x, y: 0, z}, (water ? .7 : .55) * scale, {sound: false});
-        if (hull.steam) this.steam(at, 1.4 * scale);
-        if (debris) {
-            this.cookOffs(at, scale * hull.ordnance);
-            this.spill(at, scale * Math.max(.6, fuel));
-            // A carrier's aviation fuel and ordnance go up a moment later.
-            if (hull.secondary) this.later(.3 + r() * .4, () => this.pop(at.clone().add(new THREE.Vector3((r() - .5) * .2, .03, (r() - .5) * .2)), .75 * scale, true));
-        }
-        this.onShake(at, .5 * scale * Math.sqrt(blast.flash));
-        if (sound) this.onSound('explosion', at, scale * Math.sqrt(blast.flash));
+            // Fast, narrow jets entrain air and stop; AP bursts favour an upward vent.
+            for (let i = 0; i < Math.round(16 + 22 * size); i++) {
+                const dir = randomDir(blast.vent ? .75 : .2);
+                const speed = radius * (5 + r() * 7);
+                this.spawn({x, y: y + .02, z, vx: dir.x * speed + carry.x * .4, vy: dir.y * speed, vz: dir.z * speed + carry.z * .4, ramp: RAMP.FIRE, frame: FRAME.FLAME, size: radius * (.22 + r() * .4), life: .16 + r() * (.2 + fuel * .18), drag: 5, lift: .8, cool: .4, turb: .65, intensity: .8});
+            }
+            if (fuel > .6) this.later(.09, () => {
+                this.fireballs?.spawn({x: x + carry.x * .06, y: y + radius * .6, z: z + carry.z * .06}, radius * 1.15, {heat: .8, life: 1.8 + fuel * .4, rise: .7, velocity: {x: carry.x * .18, y: .12, z: carry.z * .18}, cooling: .55});
+            });
+            // Soot starts in the expanding gas, then rises and shears with the wind.
+            for (let i = 0; i < Math.round(12 + 22 * size * blast.smoke); i++) {
+                const dir = randomDir(.35), speed = radius * (1 + r() * 3);
+                this.spawn({x: x + dir.x * radius * .3, y: y + .03 + dir.y * radius * .4, z: z + dir.z * radius * .3, vx: dir.x * speed + carry.x * .18, vy: dir.y * speed + .15, vz: dir.z * speed + carry.z * .18, ramp: i % 5 === 0 ? RAMP.SMOKE_FIRE : RAMP.SMOKE_DARK, frame: FRAME.SMOKE, size: radius * (.7 + r() * .9), life: 4 + r() * 5, drag: 1.8, lift: .35 + size * .15, cool: 2.5, wind: 1, turb: .55, delay: .06 + r() * .25});
+            }
+            // Few substantial fragments, rather than a uniform shower of orange confetti.
+            if (debris) this.debris.burst(at, Math.round(5 + 9 * size * blast.debris), size, Math.round(blast.burning * size), carry);
+            for (let i = 0; i < Math.round(8 * size); i++) {
+                const dir = randomDir(.2), speed = (.5 + r() * 1.5) * Math.sqrt(size);
+                this.spawn({x, y: y + .03, z, vx: dir.x * speed + carry.x, vy: dir.y * speed + .3, vz: dir.z * speed + carry.z, ramp: RAMP.EMBER, frame: FRAME.EMBER, size: .008 + r() * .008, life: .7 + r(), drag: .8, lift: -DEBRIS_GRAVITY, collide: true});
+            }
+            // A pressure wave is principally refraction, not a glowing bubble. Water
+            // displacement is strong only when the blast actually couples to the sea.
+            if (size > .55) this.shock(at, Math.min(1.3, size));
+            if (wet) {
+                this.rings.ring(at, size, 'water');
+                this.ocean.addImpact(x, z, .7 * size * blast.push);
+                this.splash({x, y: 0, z}, (water ? .7 : .45) * size, {sound: false});
+            }
+            if (hull.steam) this.steam(at, size);
+            if (debris && size > .45) {
+                this.cookOffs(at, size * hull.ordnance);
+                if (fuel > .6 && wet) this.spill(at, size * fuel);
+                if (hull.secondary) this.later(.4 + r() * .4, () => this.pop(at.clone().add(new THREE.Vector3((r() - .5) * .2, .03, (r() - .5) * .2)), .6 * size, true));
+            }
+            this.onShake(at, .4 * size);
+            if (sound) this.onSound('explosion', at, Math.max(.25, size));
+        };
+        if (physics.delay) this.later(physics.delay, burst); else burst();
     }
 
     // A shock front racing out from a big blast at the speed of sound (about 4.5 squares a second), for the
@@ -1104,22 +1102,22 @@ const FIRE_LIGHT = new THREE.Color(1, .55, .22);
 //   strike: a 900 kg bomb, the biggest fireball, debris column and shock front.
 //   secondary: magazines and fuel tanks going up as a ship founders.
 const BLASTS = {
-    gun: {fireball: .7, fuel: .1, smoke: .7, flash: .7, debris: .6, burning: 1, rain: 5, push: .6},
-    salvo: {fireball: 1.15, fuel: .3, smoke: 1.2, flash: 1.25, debris: 1.5, burning: 3, rain: 10, push: 1.1, vent: true},
-    missile: {fireball: 1.05, fuel: 1, smoke: 1.35, flash: 1, debris: 1, burning: 4, rain: 22, push: 1},
-    subMissile: {fireball: 1.05, fuel: 1, smoke: 1.35, flash: 1, debris: 1, burning: 4, rain: 22, push: 1},
-    strike: {fireball: 1.45, fuel: .5, smoke: 1.6, flash: 1.5, debris: 1.7, burning: 5, rain: 16, push: 1.4},
-    secondary: {fireball: .95, fuel: 1.2, smoke: 1.2, flash: .9, debris: .9, burning: 3, rain: 14, push: .9},
-    torpedo: {fireball: .8, fuel: .2, smoke: .9, flash: .9, debris: 1, burning: 1, rain: 6, push: 1.3},
+    gun: {fuel: .1, smoke: .7, debris: .6, burning: 1, push: .6},
+    salvo: {fuel: .3, smoke: 1.2, debris: 1.5, burning: 3, push: 1.1, vent: true},
+    missile: {fuel: 1, smoke: 1.35, debris: 1, burning: 4, push: 1},
+    subMissile: {fuel: 1, smoke: 1.35, debris: 1, burning: 4, push: 1},
+    strike: {fuel: .5, smoke: 1.6, debris: 1.7, burning: 5, push: 1.4},
+    secondary: {fuel: 1.2, smoke: 1.2, debris: .9, burning: 3, push: .9},
+    torpedo: {fuel: .2, smoke: .9, debris: 1, burning: 1, push: 1.3},
 };
 // How each ship takes it: fuel and ordnance aboard, armour, what its superstructure is made of.
 const HULLS = {
-    Carrier: {fire: 1, fuel: 1.4, armour: .9, sparks: 1, ordnance: 1.6, secondary: true},
-    Battleship: {fire: 1, fuel: .8, armour: .55, sparks: 1.8, ordnance: 1.2},
-    Cruiser: {fire: 1.1, fuel: 1, armour: 1, sparks: 1, ordnance: 1},
-    Destroyer: {fire: 1.15, fuel: 1, armour: 1, sparks: 1, ordnance: .9},
-    Submarine: {fire: .6, fuel: .5, armour: 1, sparks: .7, ordnance: .6, steam: true},
-    none: {fire: 1, fuel: 1, armour: 1, sparks: 1, ordnance: 1},
+    Carrier: {fuel: 1.4, sparks: 1, ordnance: 1.6, secondary: true},
+    Battleship: {fuel: .8, sparks: 1.8, ordnance: 1.2},
+    Cruiser: {fuel: 1, sparks: 1, ordnance: 1},
+    Destroyer: {fuel: 1, sparks: 1, ordnance: .9},
+    Submarine: {fuel: .5, sparks: .7, ordnance: .6, steam: true},
+    none: {fuel: 1, sparks: 1, ordnance: 1},
 };
 
 function randomDir(upBias = 0) {
@@ -1151,14 +1149,16 @@ class Debris {
     }
 
     // Some of the wreckage is burning (fuel-soaked, or hot enough to glow): it streaks flame as it flies.
-    burst(at, count, scale, burning = 0) {
+    burst(at, count, scale, burning = 0, momentum = {x: 0, y: 0, z: 0}) {
         for (let i = 0; i < count && this.items.length < 220; i++) {
             const dir = randomDir(.35);
-            const speed = (1 + Math.random() * 2.2) * Math.sqrt(scale);
+            const fragmentSize = (.008 + Math.pow(Math.random(), 2) * .035) * Math.sqrt(scale);
+            // Larger pieces have less speed and less drag per unit mass.
+            const speed = (.7 + Math.random() * 1.3) * Math.sqrt(scale) * Math.sqrt(.018 / fragmentSize);
             this.items.push({
-                p: new THREE.Vector3(at.x, at.y + .05, at.z), v: dir.multiplyScalar(speed).add(new THREE.Vector3(0, 1.2, 0)),
+                p: new THREE.Vector3(at.x, at.y + .05, at.z), v: dir.multiplyScalar(speed).add(new THREE.Vector3(momentum.x, .6, momentum.z)),
                 r: new THREE.Vector3(Math.random() * 6, Math.random() * 6, Math.random() * 6), w: new THREE.Vector3((Math.random() - .5) * 14, (Math.random() - .5) * 14, (Math.random() - .5) * 14),
-                s: (.012 + Math.random() * .03) * Math.sqrt(scale), smoke: Math.random() < .6, fire: i < burning,
+                s: fragmentSize, drag: .22 * .018 / fragmentSize, age: 0, smokeClock: 0, smoke: Math.random() < .6, fire: i < burning,
             });
         }
     }
@@ -1171,28 +1171,37 @@ class Debris {
     update(dt) {
         const fx = this.effects;
         this.items = this.items.filter(item => {
-            item.v.y -= 4.6 * dt;
-            item.v.multiplyScalar(Math.exp(-.25 * dt));
-            item.p.addScaledVector(item.v, dt);
+            const previous = item.p.clone();
+            item.age += dt;
+            integrateDrag(item.p, item.v, dt, item.drag, -DEBRIS_GRAVITY);
+            const sea = fx.ocean.height(item.p.x, item.p.z, fx.time);
+            const landed = item.p.y <= sea && item.v.y < 0;
+            if (landed) {
+                const fraction = THREE.MathUtils.clamp((previous.y - sea) / Math.max(1e-6, previous.y - item.p.y), 0, 1);
+                item.p.lerpVectors(previous, item.p, fraction);
+                item.p.y = sea;
+            }
             item.r.addScaledVector(item.w, dt);
             if (item.fire) {
                 // A continuous streak of flame and smoke behind it, laid down along the whole of this frame's path.
-                const from = item.last || item.p;
+                const from = previous;
                 const length = from.distanceTo(item.p), n = Math.min(10, Math.ceil(length / .012));
                 for (let k = 0; k < n; k++) {
                     const f = (k + Math.random()) / n;
                     const x = from.x + (item.p.x - from.x) * f, y = from.y + (item.p.y - from.y) * f, z = from.z + (item.p.z - from.z) * f;
-                    fx.spawn({x, y, z, vx: item.v.x * .08, vy: item.v.y * .08, vz: item.v.z * .08, ramp: RAMP.BLAZE, frame: FRAME.FLAME, size: .03 + Math.random() * .02, life: .2 + Math.random() * .14, drag: 2, lift: 1, cool: .3, intensity: .9});
+                    fx.spawn({x, y, z, vx: item.v.x * .08, vy: item.v.y * .08, vz: item.v.z * .08, ramp: RAMP.BLAZE, frame: FRAME.FLAME, size: item.s * (.5 + Math.random() * .4), life: .12 + Math.random() * .1, drag: 2, lift: 1, cool: .3, intensity: .9});
                     if (Math.random() < .45) fx.spawn({x, y, z, ramp: RAMP.SMOKE_DARK, frame: FRAME.SMOKE, size: .04, life: 2.2 + Math.random(), drag: 1, lift: .2, cool: 1.5, wind: .6, turb: .3, alpha: .7});
                 }
-                item.last = (item.last || item.p.clone()).copy(item.p);
-            } else if (item.smoke && Math.random() < .7) fx.spawn({x: item.p.x, y: item.p.y, z: item.p.z, ramp: RAMP.SMOKE_DARK, frame: FRAME.WISP, size: .04, life: 1.1, drag: 1, wind: .4, alpha: .7});
-            if (item.p.y < 0) {
-                for (let i = 0; i < 8; i++) fx.spawn({x: item.p.x, y: .01, z: item.p.z, vx: (Math.random() - .5) * .4, vy: .8 + Math.random() * .8, vz: (Math.random() - .5) * .4, ramp: RAMP.SPRAY, frame: FRAME.SPRAY, size: .04 + Math.random() * .04, life: .5 + Math.random() * .3, drag: .5, lift: -5, collide: true});
+            } else if (item.smoke && (item.smokeClock += dt) >= 1 / 30) {
+                item.smokeClock %= 1 / 30;
+                fx.spawn({x: item.p.x, y: item.p.y, z: item.p.z, ramp: RAMP.SMOKE_DARK, frame: FRAME.WISP, size: .04, life: 1.1, drag: 1, wind: .4, alpha: .7});
+            }
+            if (landed) {
+                for (let i = 0; i < 8; i++) fx.spawn({x: item.p.x, y: sea + .01, z: item.p.z, vx: (Math.random() - .5) * .4, vy: .8 + Math.random() * .8, vz: (Math.random() - .5) * .4, ramp: RAMP.SPRAY, frame: FRAME.SPRAY, size: .04 + Math.random() * .04, life: .5 + Math.random() * .3, drag: .5, lift: -5, collide: true});
                 fx.ocean.addImpact(item.p.x, item.p.z, .18);
                 return false;
             }
-            return true;
+            return item.age < 12;
         });
         this.items.forEach((item, i) => {
             this.quaternion.setFromEuler(this.euler.set(item.r.x, item.r.y, item.r.z));

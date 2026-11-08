@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Ship impact review</title>
+<link rel="icon" href="data:,">
+<script type="importmap">{"imports":{"three":"/static/vendor/three/three.module.js","three/addons/":"/static/vendor/three/addons/"}}</script>
+<style>body{margin:0;background:#111;color:white;font:14px system-ui}#theater{position:fixed;inset:0}form{position:fixed;z-index:2;left:20px;top:20px;padding:12px;background:#141c23dd;border-radius:8px}select,button,input{margin:0 8px;padding:6px}output{display:inline-block;min-width:40px}</style>
+<div id="theater"></div>
+<form onsubmit="return false">Impact <select id="kind"><option>missile</option><option>gun</option><option>salvo</option><option>strike</option><option>subMissile</option><option>torpedo</option></select><label><input id="wet" type="checkbox">Waterline</label><button id="play">Replay</button><label>Time <input id="time" type="range" min="0" max="6" step="0.01" value="0.2"></label><output id="age">0.20 s</output></form>
+<script type="module">
+import * as THREE from 'three';
+import {createTheater} from '/static/js/theater/index.js';
+const t = await createTheater(document.querySelector('#theater'));
+cancelAnimationFrame(t.frame);
+t.setCameraMode('free');
+await t.deploy('claude', [{name:'Battleship', direction:'H', cells:['D5','E5','F5','G5']}], {animate:false});
+const ship = t.fleets.claude.ships.get('Battleship');
+t.scene.updateMatrixWorld(true);
+const at = ship.body.localToWorld(new THREE.Vector3(.8, ship.surfaceAt(.8, 0) + .01, 0));
+t.camera.position.copy(at).add(new THREE.Vector3(1.3, .9, 1.5));
+t.director.controls.target.copy(at).add(new THREE.Vector3(0, .15, 0));
+t.director.controls.update();
+t.effects.onSound = () => {};
+t.effects.onShake = () => {};
+t.env.setTime('afternoon');
+let animation, elapsed = 0;
+const kind = document.querySelector('#kind'), time = document.querySelector('#time'), wet = document.querySelector('#wet');
+function begin() {
+    cancelAnimationFrame(animation);
+    t.effects.clear(); elapsed = 0;
+    // Stable random stream for comparing the same burst at different times.
+    let seed = 741;
+    const random = Math.random;
+    Math.random = () => {seed = (1664525 * seed + 1013904223) >>> 0; return seed / 4294967296;};
+    const point = at.clone(); if (wet.checked) point.y = .035;
+    try {t.effects.explosion(point, 1, {kind:kind.value, ship:'Battleship', velocity:new THREE.Vector3(3,-2,.4), waterline:wet.checked, sound:false});}
+    finally {Math.random = random;}
+}
+function advance(dt, render = true) {
+    elapsed += dt;
+    t.effects.update(dt, t.camera);
+    if (render) t.render();
+    time.value = elapsed;
+    document.querySelector('#age').value = elapsed.toFixed(2) + ' s';
+}
+function seek(seconds) {
+    begin();
+    while (elapsed + 1e-6 < seconds) advance(Math.min(1/60, seconds - elapsed), false);
+    advance(0);
+    return {particles:t.effects.count, debris:t.effects.debris.items.length, volumes:t.effects.fireballs.items.length};
+}
+time.oninput = () => seek(Number(time.value));
+kind.onchange = wet.onchange = () => seek(.2);
+document.querySelector('#play').onclick = () => {
+    begin(); let last = performance.now();
+    const frame = now => {advance(Math.min(.05,(now-last)/1000));last=now;if(elapsed<6)animation=requestAnimationFrame(frame);};
+    animation=requestAnimationFrame(frame);
+};
+window.impactReview = {t, at, seek, kind, wet};
+seek(.2);
+window.ready = true;
+</script>
+</html>

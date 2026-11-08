@@ -181,7 +181,7 @@ export class Combat {
         } else {
             const kind = context.torpedo ? 'torpedo' : context.weapon || 'missile';
             const burst = context.waterline ? impact.clone().setY(Math.min(impact.y, .045)) : impact;
-            T.effects.explosion(burst, shot.result === 'sunk' ? 1.25 : 1, {water: !!context.torpedo, kind, ship: victim.type, waterline: context.waterline});
+            T.effects.explosion(burst, shot.result === 'sunk' ? 1.25 : 1, {water: !!context.torpedo, kind, ship: victim.type, waterline: context.waterline, velocity: this.lastArrival?.velocity, round: context.torpedo ? undefined : ROUNDS[context.round]});
             if (context.torpedo) T.effects.splash(impact.clone().setY(0), 1.1, {sound: false});
             victim.addBurn(local.x, local.z, .16 + victim.beam * .3);
             const size = {gun: .6, salvo: 1.4, missile: 1.2, subMissile: 1.2, strike: 1.6, torpedo: 1.3}[kind] ?? 1;
@@ -334,7 +334,7 @@ export class Combat {
             const target = i === 0 ? impact : impact.clone().add(this.straddle(context, 1)[0].multiplyScalar(.5));
             if (i > 0 && !context.victim) target.y = 0;
             const flight = this.missileFlight(start, target, i === 0);
-            if (i > 0) flight.then(at => (context.victim ? T.effects.explosion(at, .7, {debris: false, kind: 'missile', ship: context.victim.type}) : T.effects.waterImpact(at, {velocity: at.velocity, ...ROUNDS.missile})));
+            if (i > 0) flight.then(at => (context.victim ? T.effects.explosion(at, .7, {debris: false, kind: 'missile', ship: context.victim.type, velocity: at.velocity, round: ROUNDS.missile}) : T.effects.waterImpact(at, {velocity: at.velocity, ...ROUNDS.missile})));
             flights.push(flight);
             if (i < rounds - 1) await T.wait(.55);
         }

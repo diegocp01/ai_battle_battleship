@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { DEPTH_GLSL, FX_LAYER } from './postfx.js';
+import { integrateDrag } from './impact-physics.js';
 
 // Volumetric fireballs. Each is a sphere the camera ray marches through: turbulent fuel and air whose
 // temperature sets its glow (white-yellow at the core of a fresh burst, through orange and dull red as it
@@ -66,13 +67,16 @@ void main() {
         float n = fbm(flow);
         // Lumpy, cauliflower billows rather than a ball: the edge is pushed in and out by two scales of noise.
         float lumps = fbm(q * 5.3 + uSeed * 1.7 - vec3(0., uRoll * 1.4, 0.));
-        float shape = smoothstep(1., .38, r + (n - .5) * 1.1 + (lumps - .5) * .55);
+        float shape = (1. - smoothstep(.32, 1., r + (n - .5) * .95 + (lumps - .5) * .5))
+                    * (1. - smoothstep(.85, 1., r));
         float density = shape * (.4 + n) * uDensity;
         if (density < .01) continue;
         // Hottest at the core and while fresh; the outside cools first.
         float temp = clamp(uHeat * (1.3 - r * .95) * (.35 + n * 1.25) * (.7 + lumps * .6), 0., 1.);
         vec3 soot = vec3(.07, .06, .055) * (uAmbient + uSunColor * clamp(dot(normalize(q + 1e-4), uSunDir) * .5 + .5, 0., 1.) * .6);
-        vec3 emit = glow(temp) * smoothstep(.12, .3, temp) + soot;
+        // Cooler soot veils the hot pockets; the entire sphere never glows uniformly.
+        float hotPocket = smoothstep(.3, .65, n + lumps * .22);
+        vec3 emit = glow(temp) * smoothstep(.12, .3, temp) * hotPocket + soot;
         float a = 1. - exp(-density * dt / uRadius * 7.);
         light += transmit * a * emit;
         transmit *= 1. - a;
@@ -111,12 +115,14 @@ export class Fireballs {
     }
 
     // A burst of the given final radius (world units) at a point. heat: 1 for a warhead, less for a fuel flash.
-    spawn(at, radius, {heat = 1, life = 2.1, rise = .5} = {}) {
+    spawn(at, radius, {heat = 1, life = 2.1, rise = .5, velocity = {x: 0, y: 0, z: 0}, cooling = .42} = {}) {
         const mesh = this.pool.find(m => !m.visible) || this.items.sort((a, b) => b.t - a.t)[0]?.mesh;
         if (!mesh) return;
         this.items = this.items.filter(item => item.mesh !== mesh);
         mesh.visible = true;
-        this.items.push({mesh, center: new THREE.Vector3(at.x, at.y, at.z), radius, heat, life, rise, t: 0, vy: 0, seed: Math.random() * 40});
+        const item = {mesh, center: new THREE.Vector3(at.x, at.y, at.z), radius, heat, life, rise, cooling, t: 0, velocity: new THREE.Vector3(velocity.x, velocity.y, velocity.z), seed: Math.random() * 40};
+        this.items.push(item);
+        this.present(item);
     }
 
     setSoft(on) {
@@ -138,21 +144,24 @@ export class Fireballs {
             }
             // Thrown out at blast speed and stopped by the air within a fraction of a second; then buoyancy
             // lifts it, more slowly as it cools and mixes.
-            const grow = 1 - Math.exp(-item.t / .09);
-            const radius = item.radius * (.15 + .85 * grow) * (1 + item.t * .25);
-            item.vy += item.rise * Math.exp(-item.t / .8) * dt;
-            item.vy *= Math.exp(-dt * 1.2);
-            item.center.y += item.vy * dt;
-            const u = item.mesh.material.uniforms;
-            u.uCenter.value.copy(item.center);
-            u.uRadius.value = radius;
-            u.uHeat.value = item.heat * Math.exp(-item.t / .42);
-            u.uDensity.value = (1 - Math.pow(k, 2)) * 1.4;
-            u.uSeed.value = item.seed;
-            u.uRoll.value = item.t * 1.3;
-            item.mesh.position.copy(item.center);
-            item.mesh.scale.setScalar(radius * 1.02);
+            integrateDrag(item.center, item.velocity, dt, 1.8, item.rise * Math.exp(-(item.t - dt * .5) / .8));
+            this.present(item);
             return true;
         });
+    }
+
+    present(item) {
+        const k = item.t / item.life;
+        const grow = 1 - Math.exp(-item.t / .065);
+        const radius = item.radius * (.12 + .88 * grow) * (1 + Math.sqrt(item.t) * .22);
+        const u = item.mesh.material.uniforms;
+        u.uCenter.value.copy(item.center);
+        u.uRadius.value = radius;
+        u.uHeat.value = item.heat * Math.exp(-item.t / item.cooling);
+        u.uDensity.value = (1 - Math.pow(k, 2)) * 1.6 / (1 + item.t * .35);
+        u.uSeed.value = item.seed;
+        u.uRoll.value = item.t * 1.3;
+        item.mesh.position.copy(item.center);
+        item.mesh.scale.setScalar(radius * 1.02);
     }
 }
