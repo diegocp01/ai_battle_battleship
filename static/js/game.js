@@ -5,8 +5,6 @@ const $ = (id) => document.getElementById(id);
 const PLAYERS = ['gpt', 'claude'];
 const SHIPS = {Carrier: 5, Battleship: 4, Cruiser: 3, Submarine: 3, Destroyer: 2};
 const names = {gpt: 'GPT', claude: 'Claude'};
-// What the legends under the boards show, kept so a theater that loads late can catch up.
-const legends = {gpt: null, claude: null};
 const settingsKey = 'battleship-settings';
 let preferences = {};
 try { preferences = JSON.parse(localStorage.getItem(settingsKey)) || {}; } catch {}
@@ -101,7 +99,6 @@ async function loadTheater() {
         };
         updateSafeArea();
         showNames();
-        showLegends();
         if (!state?.started) await theater.setAttract(true);
         else await theater.syncState(state);
     } catch (error) {
@@ -124,8 +121,10 @@ function updateSafeArea() {
     } else if (!hidden) {
         const board = document.querySelector('.scoreboard').getBoundingClientRect();
         const commentary = document.querySelector('.match-center').getBoundingClientRect();
-        insets.top = board.bottom - 6;
-        // Frame the fleets (and the legends under them) above the commentary.
+        // Room for the reasoning lines (up to three) typed under the scoreboard.
+        const thoughts = document.querySelector('.thoughts').getBoundingClientRect();
+        insets.top = thoughts.top + 3 * 18.5;
+        // Frame the fleets below the scoreboard and the reasoning under it, and above the commentary.
         insets.bottom = Math.min(Math.max(0, height - commentary.top) + 8, height * .4);
     }
     theater.setSafeArea(insets);
@@ -142,7 +141,6 @@ function setScreen(screen) {
     $('match-view').classList.toggle('hidden', screen !== 'match');
     requestAnimationFrame(updateSafeArea);
     showNames();
-    showLegends();
 }
 
 function applyCamera(camera) {
@@ -224,15 +222,11 @@ function renderPlayers(current) {
             }
             scores[key] = stats.sunk;
         }
-        // Own fleet: the legend fixed on the water under the board, and pips on the scoreboard.
+        // Own fleet: pips on the scoreboard, and the model's latest reasoning typed out under its mascot.
         const fleet = new Map(player.fleet.map(ship => [ship.name, ship]));
         const afloat = player.fleet.filter(ship => !ship.sunk).length;
-        legends[key] = {
-            fleet: Object.keys(SHIPS).map(type => ({type, sunk: Boolean(fleet.get(type)?.sunk), damaged: Boolean(fleet.get(type)?.hits.length)})),
-            // One line from the model's own reasoning (its thinking summary); the answer's reason when it gave none.
-            text: player.thought || player.reasoning || 'No moves yet.',
-            notes: player.notes || '',
-        };
+        // One line from the model's own reasoning (its thinking summary); the answer's reason when it gave none.
+        typeThought(key, player.thought || player.reasoning || '');
         for (const pip of $(key + '-pips').children) {
             const ship = fleet.get(pip.dataset.ship);
             const size = SHIPS[pip.dataset.ship];
@@ -248,15 +242,40 @@ function renderPlayers(current) {
     }
 }
 
-// The legends fixed on the water under each board, during a match only.
-function showLegends() {
-    if (!theater) return;
-    const inMatch = document.body.classList.contains('is-match');
-    for (const key of PLAYERS) theater.setLegend(key, inMatch ? legends[key] : null);
+// Each model's latest reasoning, typed out slowly under its mascot. The side that just moved is lit; the full
+// sentence is in the page for screen readers at once (the typing itself is hidden from them).
+const thoughts = {gpt: {text: '', timer: 0}, claude: {text: '', timer: 0}};
+const TYPING_RATE = 24;  // characters a second
+
+function typeThought(key, text) {
+    const slot = thoughts[key];
+    text = String(text || '').trim();
+    if (text === slot.text) return;
+    slot.text = text;
+    clearInterval(slot.timer);
+    const element = $(key + '-thought'), typed = element.querySelector('[data-typed]');
+    $(key + '-thought-text').textContent = text;
+    element.classList.toggle('empty', !text);
+    if (text) for (const side of PLAYERS) $(side + '-thought').classList.toggle('latest', side === key);
+    if (!text || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        typed.textContent = text;
+        element.classList.remove('typing');
+        return;
+    }
+    let shown = 0;
+    typed.textContent = '';
+    element.classList.add('typing');
+    slot.timer = setInterval(() => {
+        shown += 1;
+        typed.textContent = text.slice(0, shown);
+        if (shown >= text.length) {
+            clearInterval(slot.timer);
+            element.classList.remove('typing');
+        }
+    }, 1000 / TYPING_RATE);
 }
 
 function renderScoreboard(current) {
-    showLegends();
     showNames();
     const crowned = current.game_over ? current.winner : null;
     for (const model of PLAYERS) document.querySelector('.' + model + '-side').classList.toggle('has-crown', crowned === model);

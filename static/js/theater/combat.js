@@ -741,6 +741,8 @@ export class Combat {
             ship.attach(anchor);
             T.effects.addFire(anchor, 1.25);
         }
+        // Her fuel spills and catches on the water as she goes down, so the wreck never stops burning.
+        ship.oilSpots().forEach((at, i) => T.effects.oilFire(at, .75 + Math.random() * .45, .8 + i * 1.1));
         T.audio.play('creak', ship.root.position);
         T.ocean.addSlick(ship.root.position.x, ship.root.position.z, ship.length * .62);
         T.effects.flotsam.scatter(ship.root.position, ship.length * .45, 18 + Math.round(ship.length * 9));

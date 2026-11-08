@@ -213,8 +213,8 @@ export class Theater {
         this.audio.pace = this.pace;
         this.audio.setCamera(camera);
         this.grid = new Battlefield(scene, this.ocean, {origins: ORIGINS, colors: this.colors, names: {gpt: TEAMS.gpt.name, claude: TEAMS.claude.name}});
-        // The framed area: both boards, their banners above and their legends below.
-        this.director = new Director(camera, renderer.domElement, {bounds: {center: new THREE.Vector3(0, 0, .55), width: 23.5, depth: 12.6}});
+        // The framed area: both boards and their banners above.
+        this.director = new Director(camera, renderer.domElement, {bounds: {center: new THREE.Vector3(0, 0, -.45), width: 23.5, depth: 11.9}});
         this.director.onNear = (near) => this.setNear(near);
         this.effects = new Effects(scene, {
             atlas: this.textures.atlas, ocean: this.ocean, env: this.env,
@@ -386,7 +386,6 @@ export class Theater {
         this.effects.seaTime = sea;
         this.effects.update(dt, this.camera);
         this.grid.update(dt, sea);
-        this.grid.updateLegends(this.camera);
         this.air.update(dt, time);
         const flash = this.grade.uniforms.uFlash;
         flash.value *= Math.exp(-realDt * 9);
@@ -633,6 +632,7 @@ export class Theater {
                     ship.attach(anchor);
                     this.effects.addFire(anchor, 1.25);
                 }
+                for (const at of ship.oilSpots()) this.effects.oilFire(at, .75 + Math.random() * .45);
                 this.grid.markSunk(defender, ship.cells);
                 this.ocean.addSlick(ship.root.position.x, ship.root.position.z, ship.length * .6);
                 this.effects.flotsam.scatter(ship.root.position, ship.length * .45, 14 + Math.round(ship.length * 6));
@@ -664,11 +664,6 @@ export class Theater {
             for (const team of ['gpt', 'claude']) await this.deploy(team, randomFleet(), {animate: false});
         }
         this.nextDemo = 3.5;
-    }
-
-    // The legends fixed on the water under each board (null hides one).
-    setLegend(team, data) {
-        this.grid?.setLegend(team, data);
     }
 
     // The banners on the water name the models in play.

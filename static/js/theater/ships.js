@@ -1029,6 +1029,18 @@ export class Ship {
         return [this.length * .06, -this.length * .16].map(x => [x, this.deckHeight(x) + lift, 0]);
     }
 
+    // Where her fuel burns on the water as she goes down (world points beside the hull, at the waterline): the
+    // fires on her decks drown as she settles, and these keep the wreck burning and smoking.
+    oilSpots() {
+        const count = this.type === 'Carrier' || this.type === 'Battleship' ? 3 : 2;
+        this.root.updateMatrixWorld(true);
+        return Array.from({length: count}, (_, i) => {
+            const x = (i / Math.max(1, count - 1) - .5) * this.length * .6 + (Math.random() - .5) * .2;
+            const side = Math.random() < .5 ? -1 : 1;
+            return this.root.localToWorld(new THREE.Vector3(x, 0, side * (this.beam * .5 + .04 + Math.random() * .16)));
+        });
+    }
+
     // Skip the animation: straight to the settled wreck (when a saved game is restored).
     settle(style) {
         this.sink(style);
