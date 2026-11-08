@@ -229,7 +229,8 @@ function renderPlayers(current) {
         const afloat = player.fleet.filter(ship => !ship.sunk).length;
         legends[key] = {
             fleet: Object.keys(SHIPS).map(type => ({type, sunk: Boolean(fleet.get(type)?.sunk), damaged: Boolean(fleet.get(type)?.hits.length)})),
-            text: player.reasoning || 'No moves yet.',
+            // One line from the model's own reasoning (its thinking summary); the answer's reason when it gave none.
+            text: player.thought || player.reasoning || 'No moves yet.',
             notes: player.notes || '',
         };
         for (const pip of $(key + '-pips').children) {

@@ -91,7 +91,8 @@ def catalog():
 
 
 def ask(system, prompt, schema, model, effort='default', speed='standard'):
-    """One move: returns the answer as a dict, read from the model's structured JSON output."""
+    """One move: returns (answer, thinking), the answer read from the model's structured JSON output and the
+    summary of its thinking ('' when it did not think)."""
     if not os.getenv(KEY):
         raise MoveError(f'Add {KEY} to the .env file in the project folder, then reload.')
     import anthropic
@@ -102,7 +103,8 @@ def ask(system, prompt, schema, model, effort='default', speed='standard'):
     params = {'model': model, 'max_tokens': MAX_TOKENS, 'system': system,
               'messages': [{'role': 'user', 'content': prompt}], 'output_config': output_config}
     if features['adaptive']:
-        params['thinking'] = {'type': 'adaptive'}
+        # Summarized, so the thinking comes back as text the legend can show (by default it is left out).
+        params['thinking'] = {'type': 'adaptive', 'display': 'summarized'}
     betas = []
     if speed == 'fast' and features['fast']:
         params['speed'] = 'fast'
@@ -133,4 +135,5 @@ def ask(system, prompt, schema, model, effort='default', speed='standard'):
         raise MoveError('The model declined this move' + (f' ({category}).' if category else '.'))
     if message.stop_reason == 'max_tokens':
         raise MoveError('The model ran out of output tokens before answering. Try a lower effort.')
-    return json_in(''.join(block.text for block in message.content if block.type == 'text'))
+    thinking = '\n\n'.join(block.thinking for block in message.content if block.type == 'thinking' and block.thinking)
+    return json_in(''.join(block.text for block in message.content if block.type == 'text')), thinking

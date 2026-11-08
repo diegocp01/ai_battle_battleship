@@ -25,6 +25,9 @@ if args == ['--help']:
 prompt = sys.stdin.read()
 with open(log, 'a') as f:
     f.write(json.dumps({'tool': 'claude', 'args': args, 'nested': 'CLAUDECODE' in os.environ, 'cwd': os.getcwd(), 'prompt': prompt}) + '\n')
+if os.environ.get('FAKE_OLD_CLI') and '--thinking-display' in args:
+    sys.stderr.write("error: unknown option '--thinking-display'\n")
+    sys.exit(1)
 if os.environ.get('FAKE_FAIL'):
     print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': True, 'result': 'Not logged in'}))
     sys.exit(1)
@@ -41,6 +44,13 @@ elif os.environ.get('FAKE_MEMORY'):
     answer = {'target': target, 'reasoning': f'Reason for {target}.', 'notes': f'Notes written on turn {turn}.'}
 else:
     answer = {'target': 'E5', 'reasoning': 'Claude stand-in fires at the centre.'}
+# stream-json: the assistant's turn (summarized thinking only when asked for), then the result.
+cell = answer.get('target', 'A1')
+thinking = (f'I need to answer with JSON through the StructuredOutput tool, so I am working out the move. '
+            f'{cell} sits where most ships still fit, so I am settling on {cell} with a one-sentence reasoning field.')
+blocks = [{'type': 'thinking', 'thinking': thinking if '--thinking-display' in args else ''}, {'type': 'tool_use', 'name': 'StructuredOutput', 'input': answer}]
+print(json.dumps({'type': 'system', 'subtype': 'init'}))
+print(json.dumps({'type': 'assistant', 'message': {'content': blocks}}))
 print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': '', 'structured_output': answer}))
 '''
 
@@ -74,7 +84,8 @@ elif os.environ.get('FAKE_MEMORY'):
     answer = {'target': next(c for c in ('A1', 'B2', 'C3', 'D4') if c not in fired), 'reasoning': 'Codex stand-in.', 'notes': 'Codex notes.'}
 else:
     answer = {'target': 'A1', 'reasoning': 'Codex stand-in opens in the corner.'}
-print(json.dumps({'response': '```json\n' + json.dumps(answer) + '\n```', 'reasoning': ''}))
+reasoning = f"**Picking a cell**\n\nThe corner is open. {answer.get('target', 'the fleet')} is untouched water, so I will fire at {answer.get('target', 'it')} first."
+print(json.dumps({'response': '```json\n' + json.dumps(answer) + '\n```', 'reasoning': reasoning}))
 '''
 
 
@@ -147,7 +158,16 @@ class CLIConnectionTest(unittest.TestCase):
         self.assertEqual(args[args.index('--effort') + 1], 'xhigh')
         self.assertEqual(args[args.index('--tools') + 1], '')
         self.assertIn('--no-session-persistence', args)
+        # Thinking comes back summarized, as text, in the stream-json output.
+        self.assertEqual(args[args.index('--thinking-display') + 1], 'summarized')
+        self.assertEqual(args[args.index('--output-format') + 1], 'stream-json')
         self.assertFalse(claude_calls[-1]['nested'])
+        # The legend line is one sentence of the model's own reasoning, not the answer's reason.
+        state = self.client.get('/api/game-state').get_json()['players']
+        self.assertEqual(state['claude']['thought'], 'E5 sits where most ships still fit, so I am settling on E5.')
+        self.assertEqual(state['gpt']['thought'], 'A1 is untouched water, so I will fire at A1 first.')
+        self.assertEqual(state['claude']['reasoning'], 'Claude stand-in fires at the centre.')
+        self.assertEqual(state['claude']['shots'][0]['thought'], state['claude']['thought'])
         node_calls = [c for c in self.calls() if c['tool'] == 'node']
         self.assertTrue(node_calls[-1]['script'].endswith('codex_bridge.mjs'))
         self.assertEqual((node_calls[-1]['model'], node_calls[-1]['effort']), ('gpt-6-luna', 'low'))
@@ -215,7 +235,8 @@ class CLIConnectionTest(unittest.TestCase):
 
     def test_long_answers_are_cut_at_a_word(self):
         from moves import read_shot
-        target, reasoning, notes = read_shot({'target': 'B2', 'reasoning': 'because ' * 40, 'notes': 'plan ' * 200})
+        target, reasoning, notes, thought = read_shot({'target': 'B2', 'reasoning': 'because ' * 40, 'notes': 'plan ' * 200})
+        self.assertEqual(thought, '')
         self.assertLessEqual(len(reasoning), 150)
         self.assertLessEqual(len(notes), 600)
         self.assertTrue(reasoning.endswith('because…') and notes.endswith('plan…'))
@@ -223,7 +244,7 @@ class CLIConnectionTest(unittest.TestCase):
     def test_illegal_placement_stops_the_match(self):
         import cli_players
         original = cli_players.read_placement
-        cli_players.read_placement = lambda data: ({**original(data)[0], 'Carrier': {'start': 'J10', 'direction': 'H'}}, 'Off the edge.')
+        cli_players.read_placement = lambda data, thinking='': ({**original(data)[0], 'Carrier': {'start': 'J10', 'direction': 'H'}}, 'Off the edge.', '')
         try:
             self.client.post('/api/start-games', json={'mode': 'cli', 'gpt_model': 'gpt-6-luna', 'claude_model': 'claude-haiku-5-5'})
             response = self.client.post('/api/place-ships')
@@ -234,6 +255,29 @@ class CLIConnectionTest(unittest.TestCase):
             self.assertFalse(any(state['placement_done'].values()))
         finally:
             cli_players.read_placement = original
+
+    def test_cli_without_the_thinking_flag_still_plays(self):
+        os.environ['FAKE_OLD_CLI'] = '1'
+        self.client.post('/api/start-games', json={'mode': 'cli', 'gpt_model': 'gpt-6-luna', 'claude_model': 'claude-haiku-5-5'})
+        for _ in range(2):
+            self.assertTrue(self.client.post('/api/place-ships').get_json()['success'])
+        claude = self.client.get('/api/game-state').get_json()['players']['claude']
+        self.assertEqual((claude['reasoning'], claude['thought']), ('Stacked along the west edge.', ''))
+        retried = [c['args'] for c in self.calls() if c['tool'] == 'claude']
+        self.assertIn('--thinking-display', retried[0])
+        self.assertNotIn('--thinking-display', retried[-1])
+
+    def test_one_liner_picks_the_decision_from_the_reasoning(self):
+        from moves import one_liner
+        summary = ('**Weighing the hit**\n\nI need to output JSON with a target and notes. I hit F6 last turn and E5 was a miss, '
+                   'so the ship runs along row 6 or column F. G6 keeps the line going east, so I am going with G6 in the target field. '
+                   'Then I will update my notes.')
+        self.assertEqual(one_liner(summary, 'G6'), 'G6 keeps the line going east, so I am going with G6.')
+        # Without the chosen cell, the sentence about the game wins over talk about the answer format.
+        self.assertEqual(one_liner('Answer in JSON only. The submarine and the destroyer still hide in the north-east corner.'),
+                         'The submarine and the destroyer still hide in the north-east corner.')
+        self.assertEqual(one_liner(''), '')
+        self.assertLessEqual(len(one_liner('I will fire at B2 because ' + 'it is open water and ' * 20, 'B2')), 150)
 
     def test_cli_failure_is_reported(self):
         os.environ['FAKE_FAIL'] = '1'

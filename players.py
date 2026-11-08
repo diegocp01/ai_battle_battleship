@@ -270,13 +270,13 @@ def _api_ask(player, system, prompt, schema, model, effort, speed):
 
 def api_placement(player, prompt, model, effort='default', speed='standard'):
     try:
-        return read_placement(_api_ask(player, PLACEMENT_SYSTEM, prompt, PLACEMENT_SCHEMA, model, effort, speed))
+        return read_placement(*_api_ask(player, PLACEMENT_SYSTEM, prompt, PLACEMENT_SCHEMA, model, effort, speed))
     except MoveError as error:
         raise ProviderError(str(error))
 
 
 def api_shot(player, prompt, model, effort='default', speed='standard'):
-    return read_shot(_api_ask(player, FIRE_SYSTEM, prompt, FIRE_SCHEMA, model, effort, speed))
+    return read_shot(*_api_ask(player, FIRE_SYSTEM, prompt, FIRE_SCHEMA, model, effort, speed))
 
 
 # ---------------------------------------------------------------------------------------------------------------
