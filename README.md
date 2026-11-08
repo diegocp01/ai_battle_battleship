@@ -126,13 +126,15 @@ Neither API offers a faster tier than Fast. *Default* effort sends no effort, so
 
 The Test mode model lists are in `MODELS` in `players.py`.
 
+### Carrier cinematic audio
+
+The carrier's jet now has a continuous ElevenLabs v3 engine loop from spool-up to impact, with rising throttle on deck, a steam-catapult stroke and launch whistle, then moving engine audio through climb and flight. Cockpit shots add airflow and a warning tone while muffling the exterior engine. The engine and wind follow the animation and camera, so slow motion or a speed change cannot leave the jet flying silently. Impact and reset stop the loops; mute still applies. `tests/carrier-audio-browser.html` provides a local launch and reset check.
+
 ### Open sound cues
 
 The battle already plays these sound cues; they stay silent until a recording is added. Each is listed and described in `OPEN_CUES` in `static/js/theater/sound-bank.js`. To give one a sound, add a file to `static/audio/` and an entry with the same key to `SOUND_BANK`; nothing else changes.
 
-- **Carrier launch:** `catapult` (the catapult stroke) and `deckWhistle` (the catapult officer's whistle).
 - **Cinematic-camera radio:** `radioStrikeTasking`, `radioPilotReady`, `radioAirborne`, `radioCommit` and `radioFinal`, the calls between the carrier and the pilot. These play only with the cinematic camera.
-- **Cockpit:** `cockpitWind` and `cockpitWarning`.
 
 ## Quickstart
 

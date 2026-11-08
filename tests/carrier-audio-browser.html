@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Carrier cinematic audio review</title><link rel="icon" href="data:,">
+<script type="importmap">{"imports":{"three":"/static/vendor/three/three.module.js","three/addons/":"/static/vendor/three/addons/"}}</script>
+<style>body{margin:0;background:#111;color:#fff;font:14px system-ui}#theater{position:fixed;inset:0}aside{position:fixed;z-index:3;left:16px;top:16px;width:330px;background:#112332ed;padding:16px;border-radius:12px}h1{font-size:20px;margin:0 0 10px}button,select{margin:4px;padding:8px}pre{white-space:pre-wrap;line-height:1.5;font-size:12px;color:#afe1cb}</style>
+<div id="theater"></div><aside><h1>Carrier cinematic audio</h1><button id="play" disabled>Launch jet</button><label>Speed <select id="speed"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option></select></label><button id="mute">Mute</button><button id="reset" disabled>Check reset during spool</button><pre id="status">Building scene…</pre></aside>
+<script type="module">
+import {createTheater} from '/static/js/theater/index.js';
+import {SOUND_BANK} from '/static/js/theater/sound-bank.js';
+const t=await createTheater(document.querySelector('#theater'));
+t.setCameraMode('cinematic');t.env.setTime('afternoon');
+const status=document.querySelector('#status'), play=document.querySelector('#play'), reset=document.querySelector('#reset');
+let events=[], started=0, tracking=false, sawLongLoop=false;
+const originalPlay=t.audio.play.bind(t.audio), originalLoop=t.audio.startLoop.bind(t.audio);
+function note(text){events.push(text);status.textContent=events.join('\n');}
+t.audio.play=(kind,...args)=>{const before=t.audio.sampleVoices.size;const result=originalPlay(kind,...args);if(tracking && ['catapult','deckWhistle','cockpitWarning','explosion'].includes(kind)){if(!t.audio.muted&&t.audio.sampleVoices.size<=before)throw Error('No recorded voice for '+kind);note(kind);}return result;};
+t.audio.startLoop=(kind,...args)=>{
+ const voice=originalLoop(kind,...args);
+ if(tracking){if(!t.audio.loopVoices.has(voice))throw Error('No loop voice for '+kind);note(kind+' started');}
+ return {update(...args){
+  if(tracking && kind==='jetEngine' && performance.now()-started>8500 && t.audio.loopVoices.has(voice))sawLongLoop=true;
+  voice.update(...args);
+ },stop(){voice.stop();}};
+};
+async function deploy(){
+ await t.deploy('gpt',[{name:'Carrier',direction:'H',cells:['A3','B3','C3','D3','E3']}],{animate:false});
+ await t.deploy('claude',[{name:'Battleship',direction:'H',cells:['D5','E5','F5','G5']}],{animate:false});
+ t.fleets.gpt.ships.get('Carrier').weapons=['strike'];
+}
+await deploy();play.disabled=reset.disabled=false;status.textContent='Ready. All sounds are local ElevenLabs v3 recordings.';
+async function unlock(){t.audio.unlock();t.audio.setMuted(false);document.querySelector('#mute').textContent='Mute';await t.audio.ready;if(t.audio.samples.size!==Object.keys(SOUND_BANK).length)throw Error('Missing audio assets');for(const [key,b] of t.audio.samples)if(!b.getChannelData(0).some(v=>Math.abs(v)>.001))throw Error('Silent '+key);}
+play.onclick=async()=>{
+ play.disabled=reset.disabled=true;
+ try{
+  await unlock();events=[];tracking=true;sawLongLoop=false;started=performance.now();
+  await t.playShot({player:'gpt',target:'E5',result:'hit',ship:'Battleship'});
+  tracking=false;
+  for(const cue of ['jetEngine started','deckWhistle','catapult','cockpitWind started','cockpitWarning','explosion'])if(!events.includes(cue))throw Error('Missing '+cue);
+  if(t.audio.loopVoices.size)throw Error('Flight audio survived impact');
+  if(Number(document.querySelector('#speed').value)===1&&!sawLongLoop)throw Error('Engine did not survive its 8-second recording');
+  note('PASS: '+t.audio.samples.size+' WAVs decoded; all launch/flight cues fired.');
+  note('PASS: engine sustained through flight; loops stopped at impact.');
+ }catch(e){note('FAIL: '+e.message);}finally{tracking=false;play.disabled=reset.disabled=false;}
+};
+reset.onclick=async()=>{
+ play.disabled=reset.disabled=true;
+ try{
+  await unlock();t.setSpeed(1);document.querySelector('#speed').value='1';events=[];tracking=true;
+  const shot=t.playShot({player:'gpt',target:'E5',result:'hit',ship:'Battleship'});
+  await new Promise(r=>setTimeout(r,2200));
+  if(!t.audio.loopVoices.size)throw Error('Reset test did not reach spool');
+  t.reset();await shot;
+  await new Promise(r=>setTimeout(r,500));
+  if(t.audio.loopVoices.size||events.includes('catapult')||events.includes('explosion'))throw Error('Cancelled strike resumed');
+  note('PASS: reset stopped engine and prevented late launch/impact.');
+  tracking=false;t.setCameraMode('cinematic');await deploy();
+ }catch(e){note('FAIL: '+e.message);}finally{tracking=false;play.disabled=reset.disabled=false;}
+};
+document.querySelector('#speed').onchange=e=>t.setSpeed(Number(e.target.value));
+document.querySelector('#mute').onclick=e=>{t.setMuted(!t.audio.muted);e.target.textContent=t.audio.muted?'Unmute':'Mute';};
+</script></html>

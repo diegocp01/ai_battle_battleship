@@ -47,3 +47,27 @@ The runtime chooses one impact sample per primary burst, then applies restrained
 Run `node --test tests/audio.test.mjs`. For actual browser decoding, playback, mute and voice-cleanup checks, serve the repository with `python3 -m http.server 8768` and open `http://127.0.0.1:8768/tests/audio-browser.html`. Press **Load and verify sounds**; the checks take about nine seconds, then the individual sound buttons become available.
 
 The bundled recordings load from `/static/audio/elevenlabs-v3/`; there are no credentials, remote audio URLs or generation API calls in the application.
+
+## Carrier launch and flight expansion
+
+Generated November 8, 2026 through the same ElevenLabs v3 web interface, 30% prompt influence, prompt improvement off, first take exported as stereo 48 kHz WAV. Loop mode was on for engine and cockpit airflow only. All five recordings are peak-normalized to 85% full scale; loops have a 50 ms overlap crossfade at the join, shortening them to 7.95 and 5.95 seconds. The runtime varies gain, pitch and filtering with the scene without stretching playback to the battle speed.
+
+| File | Requested duration | Original download |
+| --- | ---: | --- |
+| jet-engine-loop.wav | 8 s, loop | `Seamless_continuous__#1-1794113004323.wav` |
+| carrier-catapult.wav | 2 s | `Single_realistic_air_#1-1794113072812.wav` |
+| deck-whistle.wav | 2 s | `Isolated_realistic_f_#1-1794113137303.wav` |
+| cockpit-wind-loop.wav | 6 s, loop | `Seamless_constant_co_#1-1794113245481.wav` |
+| cockpit-warning.wav | 2 s | `Isolated_short_aircr_#1-1794113304999.wav` |
+
+This pass used 880 credits: 800 for these five recordings plus 80 for an unused duplicate catapult generation caused by the prompt field retaining its previous value. No subscription or additional credit purchase was made.
+
+Exact prompts, also retained in the user's [generation history](https://elevenlabs.io/app/sound-effects/history):
+
+- **Engine:** Seamless continuous loop of a powerful naval fighter jet twin turbofan engine under steady thrust. Dense low turbine rumble, gritty broadband exhaust roar and a restrained high mechanical whine, close exterior perspective. Constant even energy throughout, no flyby or Doppler, no startup or shutdown, no silence, no explosions, no voices, no music. Realistic organic engine texture for a moving aircraft.
+- **Catapult:** Single realistic aircraft carrier steam catapult launch. Immediate heavy mechanical shuttle clank, powerful short pressurized steam blast ripping down a metal track, accelerating steel rattle then a compact end-stop thud and brief hiss decay. Close flight deck perspective. Two seconds. No jet engine, no explosion, no music, no voices.
+- **Deck whistle:** Isolated realistic flight deck launch signal: two short piercing blasts of a metal pea whistle blown by a carrier deck officer, with a tiny breath gap and a clean brief decay. Crisp close outdoor sound, dry natural recording. No speech, no crowd, no engines, no music. Begin immediately and finish within two seconds.
+- **Cockpit airflow:** Seamless constant cockpit airflow loop inside a fast naval fighter jet. Dense rushing air over the canopy with a muted low mechanical vibration underneath, enclosed perspective, textured smooth broadband wind and a little high-speed buffeting. Steady sound throughout, no fade, no start or ending, no alarms, no speech, no music, no explosions.
+- **Warning:** Isolated short aircraft cockpit caution alert for a naval flight simulation. Three crisp alternating electronic warning beeps, restrained narrowband avionics tone with a slight cockpit speaker texture. Starts immediately, clearly separated pulses, ends cleanly within two seconds. No spoken words, no siren sweep, no engines, no music, no explosion.
+
+The five dialogue/radio placeholders remain optional and unrecorded. Engine and airflow loops have filtered-noise fallbacks during asset loading or decode failure. Their lifetime is controlled by launch/flight events rather than a fixed timer, and they are capped at four concurrent loops.

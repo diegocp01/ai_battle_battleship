@@ -31,6 +31,7 @@ const roundFor = (weapon, shooterType) => weapon === 'salvo' ? 'salvo' : weapon 
 export class Combat {
     constructor(theater) {
         this.t = theater;
+        this.epoch = 0;
         this.projectiles = [];
         const white = new THREE.MeshStandardMaterial({color: 0xe9ebe8, roughness: .4, metalness: .2});
         const body = new THREE.CylinderGeometry(.009, .011, .11, 10).rotateZ(-Math.PI / 2);
@@ -106,6 +107,8 @@ export class Combat {
     }
 
     clear() {
+        this.epoch++;
+        this.t.audio.stopLoops();
         for (const p of this.projectiles) {
             if (p.mesh) this.t.scene.remove(p.mesh);
             p.resolve(p.previous);
@@ -161,7 +164,9 @@ export class Combat {
         T.audio.play('lock');
         const origin = shooter ? shooter.root.position.clone() : T.grid.center(attacker);
         T.director.beginShot({shooter: origin, target: impact, close});
+        const epoch = this.epoch;
         await T.wait(close ? .55 : .3);
+        if (epoch !== this.epoch) return;
         const context = {shot, victim, impact};
         this.lastArrival = null;
         if (shooter) {
@@ -175,6 +180,7 @@ export class Combat {
         } else {
             await this.fly({kind: 'shell', path: this.ballistic(origin.clone().setY(.3), impact, 3), duration: 1.4, primary: true});
         }
+        if (epoch !== this.epoch) return;
         T.grid.release();
         if (!victim) {
             if (context.torpedo) T.effects.splash(impact, 1.55);
@@ -438,7 +444,7 @@ export class Combat {
     // the barrier. Having seen the enemy fleet, it does not come back: the pilot pushes over into a dive and flies
     // the jet, Mk 84 still on its centreline, into the target cell, into the ship there or into the sea.
     async strike(carrier, impact, context) {
-        const T = this.t;
+        const T = this.t, epoch = this.epoch;
         T.scene.updateMatrixWorld();
         const cat = carrier.catapult;
         const deckStart = carrier.body.localToWorld(cat.start.clone());
@@ -488,18 +494,20 @@ export class Combat {
             carrier.attach(g);
         }
         const cinematic = T.director.mode === 'cinematic';
-        // Radio calls play only with the cinematic camera; the cues are silent until recordings are added.
+        // Radio calls remain optional; mechanical launch and flight audio play in every camera mode.
         const radio = (cue, at = deckStart) => { if (cinematic) T.audio.play(cue, at); };
         T.scene.updateMatrixWorld();
         const directorAt = crew[0].crew.group.getWorldPosition(new THREE.Vector3());
         T.director.cueStrike('spool', {at: deckStart.clone(), forward, crew: directorAt});
-        T.audio.play('jet', deckEnd, 6.5);
+        const engine = T.audio.startLoop('jetEngine', deckStart, {level:.25, rate:.72, cutoff:1300});
+        let cockpitWind = null;
         radio('radioStrikeTasking');
         // Spool-up: the deflector comes up, the engines wind to full afterburner, steam leaks from the track, and
         // the crew runs the launch. Longer with the cinematic camera, so the signals and the radio can play out.
         const spool = cinematic ? 2.8 : 1.5;
         let whistled = false, ready = false;
         await T.tween(spool, (k) => {
+            engine.update(jet.position, {level:.25 + .75*k, rate:.72 + .38*k, cutoff:1300 + 4700*k});
             directorPose(crew[0].crew, T.time);
             shooterPose(crew[1].crew, k, T.time);
             // The lit wands draw streaks of light as they swing.
@@ -517,6 +525,15 @@ export class Combat {
                 T.effects.spawn({x: at.x, y: at.y - .01, z: at.z, vx: (Math.random() - .5) * .05, vy: .05 + Math.random() * .08, vz: (Math.random() - .5) * .05, ramp: RAMP.STEAM, frame: FRAME.SMOKE, size: .03 + Math.random() * .04, life: 1.4 + Math.random(), drag: 1.5, lift: .2, wind: .7, alpha: .6});
             }
         });
+        if (epoch !== this.epoch) {
+            engine.stop();
+            jet.removeFromParent(); jbd.removeFromParent();
+            for (const member of crew) member.crew.group.removeFromParent();
+            const heatIndex = T.effects.heatSources.indexOf(heat);
+            if (heatIndex >= 0) T.effects.heatSources.splice(heatIndex, 1);
+            jet.traverse(o => { if (o !== slung) o.geometry?.dispose(); });
+            return deckStart;
+        }
         // The deck camera stands on the port side of the bow catapult, clear of the deck park on the starboard side.
         const deckCamera = carrier.body.localToWorld(cat.start.clone().lerp(cat.end, .72).add(new THREE.Vector3(0, .026, -.17)));
         T.director.cueStrike('catapult', {start: deckStart.clone(), end: deckEnd.clone(), forward, camera: deckCamera});
@@ -596,6 +613,9 @@ export class Combat {
         // Its slow motion comes at the end of the dive, not at a fixed share of the flight.
         record.slowed = true;
         record.onStep = (k, position, p) => {
+            const inCockpit = cinematic && diving && !terminal;
+            engine.update(position, {level:inCockpit ? .55 : 1, rate:1.1 + .1*k, cutoff:inCockpit ? 1600 : 6000});
+            cockpitWind?.update(position, {level:.65 + .35*k, rate:1 + .15*k, cutoff:6500});
             const s = distanceAt(k * duration), u = s / length;
             const ahead = curve.getPointAt(Math.min(1, u + .01));
             const behind = curve.getPointAt(Math.max(0, u - .01));
@@ -621,7 +641,7 @@ export class Combat {
                     hud.mesh.visible = true;
                     T.director.cueStrike('cockpit', {target: impact.clone(), jet, eye});
                     radio('radioCommit', position);
-                    T.audio.play('cockpitWind', position);
+                    cockpitWind = T.audio.startLoop('cockpitWind', position, {level:.8, cutoff:6500});
                 } else T.director.cueStrike('dive', {target: impact.clone()});
             }
             if (hud.mesh.visible) {
@@ -637,6 +657,7 @@ export class Combat {
             // The last 130 metres: a camera by the target watches it come in, in slow motion.
             if (!terminal && s >= length - 1.75) {
                 terminal = true;
+                cockpitWind?.stop();
                 const view = this.terminalVantage(impact, toward, outward, Boolean(context.victim));
                 hud.mesh.visible = false;
                 T.director.cueStrike('terminal', {target: impact.clone(), camera: view, look: impact.clone().lerp(position, .22)});
@@ -645,7 +666,10 @@ export class Combat {
             }
         };
         const arrival = await promise;
-        T.effects.heatSources.splice(T.effects.heatSources.indexOf(heat), 1);
+        engine.stop();
+        cockpitWind?.stop();
+        const heatIndex = T.effects.heatSources.indexOf(heat);
+        if (heatIndex >= 0) T.effects.heatSources.splice(heatIndex, 1);
         hud.mesh.visible = false;
         hud.texture.dispose();
         jet.traverse(o => { if (o !== slung) o.geometry?.dispose(); });

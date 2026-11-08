@@ -15,6 +15,7 @@ export class BattleAudio {
         this.tmp = {x: 0, y: 0, z: 0};
         this.samples = new Map();
         this.sampleVoices = new Set();
+        this.loopVoices = new Set();
     }
 
     unlock() {
@@ -150,6 +151,57 @@ export class BattleAudio {
         source.start(output.start);
         source.stop(output.start + duration);
         return true;
+    }
+
+    // A moving, sustained sound belongs to the animation, not a guessed wall-clock duration.
+    // Pitch stays natural when the battle slows; stop() is called at impact/reset.
+    startLoop(kind, at, options = {}) {
+        const silent = {update() {}, stop() {}};
+        if (!this.ctx) return silent;
+        const ctx = this.ctx, spec = SOUND_BANK[kind];
+        const source = ctx.createBufferSource();
+        source.buffer = this.samples.get(kind) || (kind === 'jetEngine' ? this.brown : this.noise);
+        if (!source.buffer || !spec) return silent;
+        source.loop = true;
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass'; filter.Q.value = .6;
+        const gain = ctx.createGain(), panner = ctx.createStereoPanner(), wet = ctx.createGain();
+        gain.gain.value = 0; wet.gain.value = .04;
+        source.connect(filter).connect(gain).connect(panner).connect(this.master);
+        panner.connect(wet).connect(this.reverb);
+        let stopped = false;
+        const voice = {
+            update: (position, {level = 1, rate = 1, cutoff = 5000} = {}) => {
+                if (stopped) return;
+                const spatial = this.place(position), now = ctx.currentTime;
+                gain.gain.setTargetAtTime(spec.gain * level * spatial.gain, now, .05);
+                panner.pan.setTargetAtTime(spatial.pan, now, .05);
+                source.playbackRate.setTargetAtTime(rate, now, .08);
+                filter.frequency.setTargetAtTime(cutoff, now, .08);
+            },
+            stop: () => {
+                if (stopped) return;
+                stopped = true;
+                this.loopVoices.delete(voice);
+                gain.gain.cancelScheduledValues(ctx.currentTime);
+                gain.gain.setTargetAtTime(0, ctx.currentTime, .025);
+                source.stop(ctx.currentTime + .12);
+            },
+        };
+        source.onended = () => {
+            stopped = true;
+            this.loopVoices.delete(voice);
+            for (const node of [source, filter, gain, panner, wet]) node.disconnect();
+        };
+        if (this.loopVoices.size >= 4) this.loopVoices.values().next().value.stop();
+        this.loopVoices.add(voice);
+        source.start();
+        voice.update(at, options);
+        return voice;
+    }
+
+    stopLoops() {
+        for (const voice of this.loopVoices) voice.stop();
     }
 
     recordedAmbience(buffer) {
