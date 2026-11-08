@@ -14,6 +14,16 @@ const other = (team) => (team === 'gpt' ? 'claude' : 'gpt');
 // littoral combat ship's aluminium superstructure, a submarine's small, closed hull.
 const FIRE_BY_WEAPON = {gun: .85, salvo: 1.3, missile: 1.25, subMissile: 1.2, strike: 1.45, torpedo: .9};
 const FIRE_BY_SHIP = {Carrier: 1.2, Battleship: .95, Cruiser: 1.05, Destroyer: 1.15, Submarine: .6};
+// What each weapon fires: mass (kg), explosive charge (kg), fuze, and the fastest it can really arrive (m/s).
+// Speed and angle at impact come from the flight itself.
+const ROUNDS = {
+    salvo: {mass: 1225, charge: 18.5, fuze: 'delay', top: 760},      // 16-inch Mk 8 armour-piercing shell
+    gun: {mass: 31.8, charge: 3.6, fuze: 'impact', top: 800},        // 5-inch high-explosive shell
+    gun57: {mass: 2.4, charge: .4, fuze: 'impact', top: 1000},       // 57 mm high-explosive round
+    missile: {mass: 520, charge: 220, fuze: 'impact', top: 300},     // subsonic anti-ship missile and its warhead
+    bomb: {mass: 925, charge: 430, fuze: 'delay', top: 350},         // Mk 84 with a short delay
+};
+const roundFor = (weapon, shooterType) => weapon === 'salvo' ? 'salvo' : weapon === 'gun' ? (shooterType === 'Destroyer' ? 'gun57' : 'gun') : weapon === 'strike' ? 'bomb' : 'missile';
 
 export class Combat {
     constructor(theater) {
@@ -81,7 +91,10 @@ export class Combat {
             if (p.onStep) p.onStep(k, position, p);
             if (k >= 1) {
                 if (p.mesh && !p.keepMesh) this.t.scene.remove(p.mesh);
-                p.resolve(position);
+                const end = position.clone();
+                end.velocity = position.clone().sub(p.path(.98)).divideScalar(.02 * p.duration);
+                if (p.primary) this.lastArrival = {velocity: end.velocity.clone(), kind: p.kind};
+                p.resolve(end);
                 return false;
             }
             return true;
@@ -147,9 +160,11 @@ export class Combat {
         T.director.beginShot({shooter: origin, target: impact, close});
         await T.wait(close ? .55 : .3);
         const context = {shot, victim, impact};
+        this.lastArrival = null;
         if (shooter) {
             const weapon = shooter.weapons[Math.floor(Math.random() * shooter.weapons.length)];
             context.weapon = weapon;
+            context.round = roundFor(weapon, shooter.type);
             // A shell can strike low on the hull, at the waterline, instead of the deck.
             context.waterline = Boolean(victim) && victim.type !== 'Submarine' && (weapon === 'salvo' || weapon === 'gun') && Math.random() < .35;
             // A turn always lands, even if an animation were to stall.
@@ -160,7 +175,7 @@ export class Combat {
         T.grid.release();
         if (!victim) {
             if (context.torpedo) T.effects.splash(impact, 1.55);
-            else T.effects.splash(impact, context.heavy ? 1.2 : 1, {explosive: true});
+            else T.effects.waterImpact(impact, {velocity: this.lastArrival?.velocity, ...(ROUNDS[context.round] || ROUNDS.gun)});
             T.grid.markMiss(defender, shot.target);
             T.director.impact(impact, 'miss');
         } else {
@@ -244,7 +259,7 @@ export class Combat {
             const {duration, height} = this.shellFlight(start, target, 1.3);
             const flight = this.fly({kind: 'shell', path: this.ballistic(start, target, height), duration: duration + i * .05, primary: i === 1});
             if (i === 1) T.audio.play('whistle', target, duration * .9);
-            else flight.then((at) => T.effects.splash(at, .75, {sound: i === 0, explosive: true}));
+            else flight.then((at) => T.effects.waterImpact(at, {velocity: at.velocity, ...ROUNDS.salvo, sound: i === 0}));
             arrivals.push(flight);
             await T.wait(.07);
         }
@@ -319,7 +334,7 @@ export class Combat {
             const target = i === 0 ? impact : impact.clone().add(this.straddle(context, 1)[0].multiplyScalar(.5));
             if (i > 0 && !context.victim) target.y = 0;
             const flight = this.missileFlight(start, target, i === 0);
-            if (i > 0) flight.then(at => (context.victim ? T.effects.explosion(at, .7, {debris: false, kind: 'missile', ship: context.victim.type}) : T.effects.splash(at, .8, {explosive: true})));
+            if (i > 0) flight.then(at => (context.victim ? T.effects.explosion(at, .7, {debris: false, kind: 'missile', ship: context.victim.type}) : T.effects.waterImpact(at, {velocity: at.velocity, ...ROUNDS.missile})));
             flights.push(flight);
             if (i < rounds - 1) await T.wait(.55);
         }
@@ -605,6 +620,6 @@ export class Combat {
         T.audio.play('cannon', start, .7);
         const {duration, height} = this.shellFlight(start, impact, 1);
         const at = await this.fly({kind: 'shell', path: this.ballistic(start, impact, height), duration});
-        T.effects.splash(at, .85);
+        T.effects.waterImpact(at, {velocity: at.velocity, ...ROUNDS.gun});
     }
 }
