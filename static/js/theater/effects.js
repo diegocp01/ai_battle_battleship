@@ -499,6 +499,139 @@ export class Effects {
         }
     }
 
+    // A projectile striking the sea, from its physics. mass: kg. velocity: at impact, in squares a second (one
+    // square is 75 m, so ×75 is m/s), which gives both speed and the angle and bearing it comes in at; the flight
+    // that produced it (a shell slowing and steepening under drag and gravity, a bomb gaining speed as it falls, a
+    // missile driven by its motor) is where acceleration enters. top: the fastest the round can really arrive
+    // (m/s), since the battle's flights are shortened in time. charge: kg of explosive. fuze: 'impact' bursts on
+    // the surface; 'delay' bursts after running a few metres under it, as armour-piercing shells and bombs do.
+    //  - The crater scales as the energy put into the water to the ¼ power (gravity-dominated cratering,
+    //    R = (E / ρg)^¼): the kinetic energy ½mv² plus the part of the charge that couples to the water (more for
+    //    a burst under the surface than on it).
+    //  - Entry throws a crown of water up and out, sized by the kinetic energy alone. Coming in at a slant, the
+    //    crown leans downrange and a fan of spray is thrown ahead; little goes back the way the round came.
+    //  - A delayed burst lifts a white spray dome first, then the plume: a narrow column about seven crater
+    //    radii tall, leaning the way the round was travelling. A surface burst makes a lower, wider plume with a
+    //    flash, a small fireball and smoke.
+    //  - The column falls back as heavy rain (each drop ringing the sea where it lands) and rolls out across the
+    //    water as a base surge of mist.
+    waterImpact(at, {velocity, mass = 100, charge = 0, fuze = 'impact', top = Infinity, sound = true} = {}) {
+        const r = Math.random;
+        const x = at.x, z = at.z;
+        const v = velocity ? velocity.clone() : new THREE.Vector3(.6, -6, 0);
+        if (v.y > -.3) v.y = -.3;
+        const speed = Math.min(v.length() * 75, top);
+        const dir = v.normalize();
+        const along = new THREE.Vector3(dir.x, 0, dir.z);
+        const slant = Math.min(1, along.length());      // cosine of the angle of fall
+        if (slant > 1e-3) along.divideScalar(slant); else along.set(1, 0, 0);
+        const across = new THREE.Vector3(-along.z, 0, along.x);
+        const burst = fuze === 'delay';
+        const kinetic = .5 * mass * speed * speed;
+        const blast = charge * 4.2e6 * (burst ? .45 : .2);
+        const crater = Math.pow((kinetic + blast) / 9810, .25) / 75;
+        const entry = Math.pow(kinetic / 9810, .25) / 75;
+        const k = crater / .12, ke = entry / .1;
+        // The particles fall under a fast gravity (squares/s²) so a 60 m column rises and falls in a couple of
+        // seconds of battle; heights and widths come from the physics above.
+        const G = 5.2;
+        // Entry: the crown.
+        const crownSpeed = Math.sqrt(2 * G * entry * 2.6);
+        const crownCount = Math.round(THREE.MathUtils.clamp(26 * Math.sqrt(ke), 10, 64));
+        for (let i = 0; i < crownCount; i++) {
+            const a = (i / crownCount) * Math.PI * 2 + r() * .3;
+            const fwd = Math.cos(a), side = Math.sin(a);
+            const ox = along.x * fwd + across.x * side, oz = along.z * fwd + across.z * side;
+            const out = crownSpeed * (.35 + .25 * r()) * (1 + slant * .9 * fwd);
+            const up = crownSpeed * (.8 + .3 * r()) * (1 - slant * .35 * fwd);
+            const size = (.03 + r() * .04) * Math.sqrt(ke);
+            this.spawn({x: x + ox * entry * .5, y: .02, z: z + oz * entry * .5, vx: ox * out, vy: up, vz: oz * out, ramp: RAMP.SPRAY, frame: FRAME.SPRAY, size, life: 1.5, drag: .2, lift: -G, collide: true, terminal: 1.5 + size * 14, stretch: .012});
+        }
+        // At a slant, a fan of spray thrown ahead as the round digs in.
+        if (slant > .3) {
+            for (let i = 0; i < 34 * slant * Math.sqrt(ke); i++) {
+                const spread = (r() - .5) * .9;
+                const ox = along.x + across.x * spread, oz = along.z + across.z * spread;
+                const sp = crownSpeed * (.6 + r() * .7) * slant;
+                const size = .022 + r() * .03;
+                this.spawn({x, y: .02, z, vx: ox * sp, vy: crownSpeed * (.3 + r() * .35), vz: oz * sp, ramp: RAMP.SPRAY, frame: FRAME.SPRAY, size, life: 1.3, drag: .3, lift: -G, collide: true, terminal: 1.4 + size * 14, stretch: .016});
+            }
+        }
+        const plume = (delay) => {
+            const height = crater * (burst ? 7 : 4.5);
+            const v0 = Math.sqrt(2 * G * height);
+            const width = crater * (burst ? 1.25 : 1.1);
+            const lean = slant * (burst ? .12 : .2);
+            const rise = v0 / G;
+            const count = Math.round(THREE.MathUtils.clamp(95 * Math.sqrt(k), 40, 170));
+            for (let i = 0; i < count; i++) {
+                const a = r() * Math.PI * 2, d = Math.sqrt(r()) * width;
+                // Most of the water leaves near the top speed: a solid column, not a cone.
+                const up = v0 * (.45 + .55 * Math.pow(r(), .55));
+                const size = (.07 + r() * .12) * Math.pow(k, .4);
+                this.spawn({x: x + Math.cos(a) * d * .5, y: .03, z: z + Math.sin(a) * d * .5, vx: Math.cos(a) * d * .9 + along.x * up * lean, vy: up, vz: Math.sin(a) * d * .9 + along.z * up * lean, ramp: RAMP.SPRAY, frame: r() < .65 ? FRAME.COLUMN : FRAME.SPRAY, size, life: 2 * up / G + .5, drag: .15, lift: -G, collide: true, terminal: 3 + size * 6, delay});
+            }
+            // Jets: the column is not a cloud but sheets and jets of solid water, which streak as they climb.
+            for (let i = 0; i < THREE.MathUtils.clamp(45 * Math.sqrt(k), 24, 80); i++) {
+                const a = r() * Math.PI * 2, d = Math.sqrt(r()) * width * .6;
+                const up = v0 * (.55 + .5 * r());
+                const size = (.022 + r() * .03) * Math.pow(k, .3);
+                this.spawn({x: x + Math.cos(a) * d * .4, y: .03, z: z + Math.sin(a) * d * .4, vx: Math.cos(a) * d * 1.2 + along.x * up * lean, vy: up, vz: Math.sin(a) * d * 1.2 + along.z * up * lean, ramp: RAMP.SPRAY, frame: FRAME.SPRAY, size, life: 2 * up / G + .3, drag: .1, lift: -G, collide: true, terminal: 2.4 + size * 14, stretch: .02, delay: delay + r() * .03});
+            }
+            // Mist torn off the column's top and sides, hanging and drifting.
+            for (let i = 0; i < 14 * k; i++) {
+                this.spawn({x: x + (r() - .5) * width + along.x * height * lean, y: height * (.4 + r() * .6), z: z + (r() - .5) * width + along.z * height * lean, vx: (r() - .5) * .3, vy: .1 + r() * .2, vz: (r() - .5) * .3, ramp: RAMP.MIST, frame: FRAME.SMOKE, size: (.2 + r() * .25) * Math.sqrt(k), life: 2.5 + r() * 2, drag: .9, wind: .8, delay: delay + rise * (.5 + r() * .5)});
+            }
+            // Base surge rolling out low across the water as the column falls back.
+            for (let i = 0; i < 22 * k; i++) {
+                const a = r() * Math.PI * 2, sp = (1 + r() * .6) * Math.sqrt(k) * .9;
+                this.spawn({x, y: .05, z, vx: Math.cos(a) * sp, vy: .05 + r() * .08, vz: Math.sin(a) * sp, ramp: RAMP.MIST, frame: FRAME.SMOKE, size: (.16 + r() * .14) * Math.sqrt(k), life: 2.2 + r() * 1.4, drag: 1.3, wind: .5, delay: delay + rise * 1.4 + r() * .3});
+            }
+        };
+        let wait = 0;
+        if (burst) {
+            // The round runs on under the surface before it bursts: a white spray dome lifts, then the plume.
+            wait = .14 + Math.min(.12, crater * .6);
+            const domeSpeed = Math.sqrt(2 * G * crater * 1.4);
+            const ox = along.x * crater * .3 * slant, oz = along.z * crater * .3 * slant;
+            this.later(wait, () => {
+                for (let i = 0; i < 44 * Math.sqrt(k); i++) {
+                    const d = randomDir(.15);
+                    const sp = domeSpeed * (.6 + r() * .4);
+                    this.spawn({x: x + ox, y: .02, z: z + oz, vx: d.x * sp, vy: Math.abs(d.y) * sp, vz: d.z * sp, ramp: RAMP.MIST, frame: FRAME.SMOKE, size: (.1 + r() * .1) * Math.sqrt(k), life: 1 + r() * .5, drag: 2.4, lift: -1});
+                }
+                this.rings.ring({x: x + ox, y: .01, z: z + oz}, crater * 5, 'water');
+                this.onShake(at, .22 * k);
+                if (sound) this.onSound('splash', at, k * 1.15);
+            });
+            plume(wait + .08);
+        } else {
+            plume(0);
+            this.rings.ring({x, y: .01, z}, crater * 5, 'water');
+            if (charge > .2) {
+                // The burst on the surface: a flash and a puff of dirty black-grey smoke. Only a warhead-sized
+                // charge makes a real fireball; a shell's few kilograms are a flash and a flicker of flame.
+                const s = THREE.MathUtils.clamp(Math.cbrt(charge) / 4, .22, 1.6);
+                this.flash({x, y: .05, z}, 2.8 * s, .2, new THREE.Color(1, .66, .36));
+                this.spawn({x, y: .06, z, ramp: RAMP.FLASH, frame: FRAME.GLOW, size: .5 * s, life: .12, drag: 0});
+                // Sitting on the water, not floating over it: the ball is a dome that lifts off as it burns.
+                if (charge >= 40) this.fireballs?.spawn({x, y: (.07 * s + .025) * .35, z}, .07 * s + .025, {heat: 1, life: .8 + .5 * s, rise: .45});
+                for (let i = 0; i < 14 * s + 4; i++) {
+                    const d = randomDir(.5), sp = (.4 + r() * .8) * s;
+                    this.spawn({x, y: .04, z, vx: d.x * sp, vy: d.y * sp + .3, vz: d.z * sp, ramp: RAMP.FIRE, frame: FRAME.FLAME, size: (.07 + r() * .08) * s, life: (.3 + r() * .25) * (charge >= 40 ? 1 : .5), drag: 4, lift: 1, cool: .4, intensity: 1});
+                }
+                for (let i = 0; i < 8 * s + 3; i++) {
+                    this.spawn({x: x + (r() - .5) * .1 * s, y: .06 + r() * .06 * s, z: z + (r() - .5) * .1 * s, vx: (r() - .5) * .15 * s, vy: .15 + r() * .2, vz: (r() - .5) * .15 * s, ramp: r() < .6 ? RAMP.SMOKE_DARK : RAMP.GUNSMOKE, frame: FRAME.SMOKE, size: (.16 + r() * .14) * s, life: 2.5 + r() * 2 * s, drag: 1.2, lift: .25, cool: 2, wind: 1, turb: .3, delay: .03 + r() * .15});
+                }
+                if (s > .8) this.shock({x, y: .1, z}, s);
+                if (sound) this.onSound('explosion', at, s * .7);
+            }
+        }
+        this.ocean.ripples?.impact(x, z, {radius: crater, strength: k, along, slant, delay: wait});
+        this.onShake(at, .12 * k);
+        if (sound) this.onSound('splash', at, Math.max(.4, k * (burst ? .6 : 1)));
+    }
+
     splash(at, scale = 1, {sound = true, explosive = false} = {}) {
         const {x, z} = at;
         const r = Math.random;

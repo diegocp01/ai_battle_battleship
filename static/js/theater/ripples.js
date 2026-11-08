@@ -225,6 +225,22 @@ export class Ripples {
         }
     }
 
+    // A projectile's impact: a crater of the given radius (squares), stretched along the way it was travelling
+    // when it came in at a slant, the white water it throws out, and rings of white spreading from it.
+    impact(x, z, {radius, strength, along = null, slant = 0, delay = 0}) {
+        const ax = along ? along.x : 0, az = along ? along.z : 0;
+        const push = () => {
+            this.push(x + ax * radius * .35 * slant, z + az * radius * .35 * slant, strength * (1 - slant * .3), radius * 1.1);
+            if (slant > .3) this.push(x - ax * radius * .4, z - az * radius * .4, strength * slant * .45, radius * .8);
+            this.whiten(x + ax * radius * .3 * slant, z + az * radius * .3 * slant, .3 + .18 * Math.min(strength, 2), radius * 1.3);
+        };
+        if (delay > 0) this.scheduled.push({at: this.time + delay, run: push});
+        else push();
+        for (const [t, r, amount] of [[.2, 1.6, .2], [.5, 3, .13], [1, 4.8, .08], [1.8, 7, .045]]) {
+            this.scheduled.push({at: this.time + delay + t * Math.sqrt(radius / .12), x, z, radius: radius * r, amount: amount * Math.min(strength, 1.6)});
+        }
+    }
+
     // Each frame: where the hulls are (soft solid capsules that the water reflects off and a moving hull pushes).
     setHulls(list) {
         for (let i = 0; i < MAX_HULLS; i++) {
@@ -258,7 +274,10 @@ export class Ripples {
         const due = this.scheduled.filter(item => item.at <= this.time);
         if (due.length) {
             this.scheduled = this.scheduled.filter(item => item.at > this.time);
-            for (const item of due) this.whiten(item.x, item.z, item.amount, .05, item.radius, .05 + item.radius * .12);
+            for (const item of due) {
+                if (item.run) item.run();
+                else this.whiten(item.x, item.z, item.amount, .05, item.radius, .05 + item.radius * .12);
+            }
         }
         const previous = this.renderer.getRenderTarget();
         // Substeps of at most 1/60 s keep the waves the same at any frame rate or battle speed. The explicit wave

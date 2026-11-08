@@ -28,8 +28,6 @@ const GRAVITY = 9.81 / 75;
 const vertexShader = /* glsl */`
 uniform float uTime;
 uniform vec4 uWaves[6];
-uniform sampler2D uRipple;
-uniform vec4 uRippleBounds;
 varying vec3 vWorld;
 varying vec3 vFlat;
 varying vec3 vMacroNormal;
@@ -59,8 +57,6 @@ void main() {
     for (int i = 0; i < 6; i++) offset += gerstner(uWaves[i], p, tangent, binormal, crest);
     vFlat = world.xyz;
     world.xyz += offset * fade;
-    vec2 ruv = (p - uRippleBounds.xy) / uRippleBounds.zw;
-    if (ruv.x > 0. && ruv.x < 1. && ruv.y > 0. && ruv.y < 1.) world.y += textureLod(uRipple, ruv, 0.).r;
     vMacroNormal = normalize(mix(vec3(0., 1., 0.), normalize(cross(binormal, tangent)), fade));
     vCrest = crest / .122 * fade;
     vWorld = world.xyz;
