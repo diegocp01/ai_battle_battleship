@@ -4,7 +4,8 @@ import {
     hullGeometry, hullProfile, deckGeometry, railGeometry, shipMaterials, flagMaterial, lerp,
 } from './shipkit.js';
 import { steelDeckTexture, teakDeckTexture, flightDeckTexture, hullNumberTexture } from './textures.js';
-import { sailor, crewGroup, windowRow, windowsAround, portholes, deckFittings, vents, raftRack, whips, roofRail, outlineRail, anchorGear, canisterLauncher, torpedoTubes, latticeMast, searchlight, ewArrays, stealthJet, hawkeye, seahawk, tug } from './detail.js';
+import { sailor, crewGroup, windowRow, windowsAround, portholes, deckFittings, vents, raftRack, whips, roofRail, outlineRail, anchorGear, canisterLauncher, torpedoTubes, latticeMast, searchlight, ewArrays, stealthJet, hawkeye, seahawk, tugParts } from './detail.js';
+import { DeckCargo } from './deck-cargo.js';
 // Each fleet's fighter, after the references: stealth fighters in the fleet's paint, with its trim and glow
 // colors, the badge on its intakes (a glowing >_ for Codex, the mascot for Claude) and its logo on the tails.
 // The Codex fighter wears its mascot's colors: the blue body, the dark navy of the visor as trim, and the pale
@@ -576,24 +577,24 @@ function carrier(b) {
     b.add('lightGreen', sphere(.0045, 8, 6), [ix + .06, top + .2, iz + .056]);
     b.add('lightWhite', sphere(.0042, 8, 6), [mastTop.x, mastTop.y + .005, mastTop.z]);
     // The deck park: the fleet's fighters along the bow and the starboard side, Hawkeyes, Seahawks, tractors.
+    // They are loose bodies on the deck (deck-cargo.js), not part of the hull: a listing or sinking carrier
+    // sheds them over the side, and a hit among them wrecks and scatters them.
     const jets = (FIGHTERS[b.team] || FIGHTERS.gpt).model(.95);
+    const cargo = {kinds: {}, items: [], deck: CARRIER_DECK, island: {minX: -.62, maxX: -.18, minZ: .32, maxZ: .45}};
+    cargo.kinds.jet = {parts: Object.fromEntries(Object.entries(FIGHTER_PARTS).map(([part, key]) => [key, jets[part] || []])), radius: .065, mass: 20000, draft: .008};
     const park = [[2.15, .14, 2.4], [1.98, .22, 2.4], [1.81, .28, 2.4], [1.64, .33, 2.4], [1.47, .36, 2.4], [1.75, -.22, -.2],
         [-.78, .34, 2.25], [-1.0, .34, 2.25], [-1.22, .34, 2.25], [-1.44, .34, 2.25], [-1.66, .34, 2.25], [-1.88, .33, 2.25], [-2.1, .31, 2.25],
         [-.9, .19, 2.25], [-1.12, .19, 2.25], [-1.34, .19, 2.25], [-1.56, .19, 2.25], [-1.78, .18, 2.25], [1.2, .38, 2.5], [1.0, .4, 2.5]];
-    for (const [x, z, yaw] of park) {
-        for (const [part, key] of Object.entries(FIGHTER_PARTS)) {
-            for (const piece of jets[part] || []) b.add(key, piece.clone(), [x, top + .013, z], [0, yaw, 0]);
-        }
-    }
+    for (const [x, z, yaw] of park) cargo.items.push({kind: 'jet', x, y: top + .013, z, yaw});
     // The Hawkeyes wear the fleet's paint too, so every plane on the deck is in its colors.
     const hawk = hawkeye(1);
-    for (const [x, z, yaw] of [[.3, .33, 2.6], [.6, .35, 2.6]]) {
-        for (const piece of hawk.gray) b.add('fighter', piece.clone(), [x, top + .006, z], [0, yaw, 0]);
-        for (const piece of hawk.white) b.add('white', piece.clone(), [x, top + .006, z], [0, yaw, 0]);
-    }
-    const helo = seahawk(1);
-    for (const [x, z, yaw] of [[-2.25, .24, 1.57], [-2.28, .07, 1.57]]) for (const piece of helo.gray) b.add('jet', piece.clone(), [x, top, z], [0, yaw, 0]);
-    for (const [x, z, yaw] of [[-.66, .2, 0], [1.3, .24, .8], [-1.95, .2, 1.2], [.15, .38, 2]]) tug(b, x, top, z, yaw);
+    cargo.kinds.hawkeye = {parts: {fighter: hawk.gray, white: hawk.white}, radius: .1, mass: 23000, draft: .008};
+    for (const [x, z, yaw] of [[.3, .33, 2.6], [.6, .35, 2.6]]) cargo.items.push({kind: 'hawkeye', x, y: top + .006, z, yaw});
+    cargo.kinds.seahawk = {parts: {jet: seahawk(1).gray}, radius: .055, mass: 10000, draft: .01};
+    for (const [x, z, yaw] of [[-2.25, .24, 1.57], [-2.28, .07, 1.57]]) cargo.items.push({kind: 'seahawk', x, y: top, z, yaw});
+    cargo.kinds.tug = {parts: tugParts(), radius: .022, mass: 8000, draft: .004};
+    for (const [x, z, yaw] of [[-.66, .2, 0], [1.3, .24, .8], [-1.95, .2, 1.2], [.15, .38, 2]]) cargo.items.push({kind: 'tug', x, y: top, z, yaw});
+    parts.cargo = cargo;
     // The flight deck crew, in their jerseys: at the catapult, round the parked jets, by the island and the fuel.
     const jerseys = ['yellow', 'crewPurple', 'crewGreen', 'crewRed', 'crewBrown', 'white', 'crewBlue'];
     for (const [x, z, n] of [[1.0, -.2, 4], [1.45, .1, 3], [2.15, .1, 2], [1.75, .2, 3], [1.3, .3, 3], [.45, .24, 3], [-.15, .3, 4], [-.62, .27, 2], [-1.05, .26, 4], [-1.5, .27, 3], [-1.85, .1, 3], [-2.15, .16, 2], [.9, .3, 2]]) {
@@ -787,6 +788,8 @@ export class Ship {
         this.torpedoTube = design.parts.torpedo || null;
         this.catapult = design.parts.catapult || null;
         this.weapons = design.weapons;
+        // A carrier's deck park, loose on the deck. effects is set when the fleet is deployed (for the splashes).
+        this.cargo = design.parts.cargo ? new DeckCargo(this, design.parts.cargo, mats) : null;
         this.root.traverse(object => {
             if (object.isMesh && object.material !== mats.rail) {
                 object.castShadow = true;
@@ -852,6 +855,8 @@ export class Ship {
         t.list = THREE.MathUtils.clamp(t.list - side * per, -.2, .2);
         t.trim = THREE.MathUtils.clamp(t.trim - local.x / Math.max(this.length, .1) * .05, -.06, .06);
         t.settle = Math.min(.04, t.settle + (waterline ? .009 : .005) * this.scale.y);
+        // On the deck, the blast wrecks the aircraft it hit and shoves the ones near it.
+        if (!waterline) this.cargo?.blast(local, size);
         // Fittings near the hit: radar antennas are blown off, turrets jam with their barrels drooping.
         const wrecked = [];
         const reach = Math.max(.12, this.length * .1);
@@ -901,6 +906,7 @@ export class Ship {
         }
         const t = this.flooding.target;
         t.list = THREE.MathUtils.clamp(t.list - side * .03, -.2, .2);
+        this.cargo?.blast({x, y: deck, z: side * this.beam * .45}, size);
         return {x, y, z, radius, deck};
     }
 
@@ -947,6 +953,10 @@ export class Ship {
         this.body.position.y = m.heave - f.settle;
         this.body.rotation.set(m.roll + f.list, 0, m.pitch + f.trim);
         if (this.sinking) this.updateSinking(dt);
+        if (this.cargo) {
+            this.root.updateMatrixWorld(true);
+            this.cargo.update(dt, time, ocean);
+        }
     }
 
     // Under way at steerage speed on her own cells: a slow surge ahead and astern of her berth (at most a fifth
@@ -1034,6 +1044,7 @@ export class Ship {
         this.sink(style);
         this.sinking.t = this.sinking.duration;
         this.state = 'sunk';
+        this.cargo?.settle();
     }
 
     updateSinking(dt) {
@@ -1074,6 +1085,7 @@ export class Ship {
     }
 
     dispose() {
+        this.cargo?.dispose();
         this.root.traverse(object => {
             if (object.isMesh) object.geometry.dispose();
         });
