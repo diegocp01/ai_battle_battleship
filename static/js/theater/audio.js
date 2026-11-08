@@ -1,4 +1,6 @@
-// Battle sound, synthesized live with Web Audio: gun blasts, shell whistles, explosions, splashes,
+import { SOUND_BANK, soundKey, loadSoundBank } from './sound-bank.js';
+
+// Local ElevenLabs v3 recordings with Web Audio synthesis as a loading/offline fallback:
 // missile and jet roars, torpedo runs, a hull groaning as it sinks, ship horns, fireworks and the sea.
 // Every sound is placed by distance and direction from the camera; a convolution reverb gives the
 // open-ocean echo, and distant events arrive a beat after their flash.
@@ -9,6 +11,8 @@ export class BattleAudio {
         try { this.muted = localStorage.getItem('battleship-muted') === '1'; } catch {}
         this.camera = null;
         this.tmp = {x: 0, y: 0, z: 0};
+        this.samples = new Map();
+        this.sampleVoices = new Set();
     }
 
     unlock() {
@@ -48,6 +52,10 @@ export class BattleAudio {
             brown[i] = last * 3.5;
         }
         this.ambience();
+        this.ready = loadSoundBank(ctx, (key, buffer) => {
+            this.samples.set(key, buffer);
+            if (key === 'ocean') this.recordedAmbience(buffer);
+        });
     }
 
     impulse(seconds, decay) {
@@ -93,7 +101,59 @@ export class BattleAudio {
         const wet = ctx.createGain();
         wet.gain.value = send;
         panner.connect(wet).connect(this.reverb);
-        return {input, start: ctx.currentTime + delay};
+        return {input, start: ctx.currentTime + delay,
+            disconnect: () => { input.disconnect(); panner.disconnect(); wet.disconnect(); }};
+    }
+
+    playSample(kind, at, scale) {
+        const key = soundKey(kind, scale);
+        const buffer = this.samples.get(key);
+        if (!buffer) return false;
+        const spec = SOUND_BANK[key];
+        const ctx = this.ctx;
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        // Preserve each weapon's character while avoiding identical repeated shots.
+        const rate = .97 + Math.random() * .06;
+        source.playbackRate.value = rate;
+        const duration = spec.timed ? Math.max(.1, Math.min(scale, buffer.duration / rate)) : buffer.duration / rate;
+        const output = this.out(at, key === 'creak' ? .16 : .08);
+        const gain = ctx.createGain();
+        const level = spec.gain * (spec.timed ? 1 : Math.min(1.5, Math.max(.15, scale)));
+        gain.gain.setValueAtTime(0, output.start);
+        gain.gain.linearRampToValueAtTime(level, output.start + .005);
+        gain.gain.setValueAtTime(level, output.start + Math.max(.005, duration - .08));
+        gain.gain.linearRampToValueAtTime(0, output.start + duration);
+        source.connect(gain).connect(output.input);
+        // Secondary explosions can overlap; bound their CPU and loudness cost.
+        if (this.sampleVoices.size >= 24) {
+            const oldest = this.sampleVoices.values().next().value;
+            this.sampleVoices.delete(oldest);
+            oldest.stop();
+        }
+        this.sampleVoices.add(source);
+        source.onended = () => {
+            this.sampleVoices.delete(source);
+            source.disconnect(); gain.disconnect(); output.disconnect();
+        };
+        source.start(output.start);
+        source.stop(output.start + duration);
+        return true;
+    }
+
+    recordedAmbience(buffer) {
+        const ctx = this.ctx;
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.loop = true;
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(SOUND_BANK.ocean.gain, ctx.currentTime + 1.5);
+        source.connect(gain).connect(this.master);
+        source.start();
+        this.oceanSource = source;
+        this.fallbackAmbienceGain.gain.setTargetAtTime(0, ctx.currentTime, .3);
+        for (const node of this.fallbackAmbienceNodes) node.stop(ctx.currentTime + 2);
     }
 
     noiseSource(start, duration, offset = Math.random() * 2) {
@@ -147,6 +207,9 @@ export class BattleAudio {
 
     play(kind, at, scale = 1) {
         if (!this.ctx || this.muted || this.ctx.state !== 'running') return;
+        if (this.playSample(kind, at, scale)) return;
+        // Distinct missile samples share the original rocket synthesis if unavailable.
+        if (kind === 'missileLight' || kind === 'subMissile') kind = 'missile';
         const ctx = this.ctx;
         if (kind === 'cannon') {
             const {input, start} = this.out(at, .55);
@@ -313,6 +376,8 @@ export class BattleAudio {
     // The sea and wind, always there under the battle.
     ambience() {
         const ctx = this.ctx;
+        this.fallbackAmbienceGain = ctx.createGain();
+        this.fallbackAmbienceGain.connect(this.master);
         const sea = ctx.createBufferSource();
         sea.buffer = this.brown;
         sea.loop = true;
@@ -324,7 +389,7 @@ export class BattleAudio {
         const swellDepth = ctx.createGain();
         swellDepth.gain.value = .09;
         swell.connect(swellDepth).connect(gain.gain);
-        sea.connect(low).connect(gain).connect(this.master);
+        sea.connect(low).connect(gain).connect(this.fallbackAmbienceGain);
         const wind = ctx.createBufferSource();
         wind.buffer = this.noise;
         wind.loop = true;
@@ -336,7 +401,8 @@ export class BattleAudio {
         const gustDepth = ctx.createGain();
         gustDepth.gain.value = .012;
         gust.connect(gustDepth).connect(windGain.gain);
-        wind.connect(band).connect(windGain).connect(this.master);
+        wind.connect(band).connect(windGain).connect(this.fallbackAmbienceGain);
         for (const node of [sea, swell, wind, gust]) node.start();
+        this.fallbackAmbienceNodes = [sea, swell, wind, gust];
     }
 }
