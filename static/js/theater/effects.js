@@ -1,0 +1,1069 @@
+import * as THREE from 'three';
+import { rampTexture } from './textures.js';
+import { NO_REFLECTION_LAYER } from './ocean.js';
+
+// Fire, smoke, spray and sparks. One instanced billboard system draws every particle in a single pass with
+// premultiplied alpha, so additive flames and lit, alpha-blended smoke mix correctly once sorted back to
+// front. Each particle reads its color, opacity, size, additivity and glow over its life from a ramp
+// texture; smoke is shaded like a sphere against the sun, and fire is bright enough to bloom.
+
+// Ramp stops: [t, r, g, b, alpha, additive, size multiplier (0–2), emissive (0–10), fade at the waterline]
+const RAMP_DEFS = {
+    FIRE: [[0, 1, .86, .55, 1, 1, .55, 4.2, 0], [.12, 1, .58, .2, 1, 1, .85, 3.4, 0], [.35, 1, .36, .08, .85, .9, 1.05, 2.2, 0], [.6, .55, .17, .05, .6, .5, 1.2, .8, 0], [1, .12, .08, .06, 0, 0, 1.35, 0, 0]],
+    SMOKE_DARK: [[0, .1, .09, .085, 0, 0, .5, 0, 1], [.06, .11, .1, .095, .62, 0, .65, 0, 1], [.5, .15, .14, .14, .44, 0, 1.3, 0, 1], [1, .26, .26, .27, 0, 0, 2.1, 0, 1]],
+    SMOKE_FIRE: [[0, 1, .5, .18, .9, .7, .5, 2.4, 1], [.1, .55, .26, .12, .85, .25, .7, 1.2, 1], [.25, .14, .12, .11, .75, 0, .95, 0, 1], [.7, .2, .19, .19, .4, 0, 1.6, 0, 1], [1, .3, .3, .31, 0, 0, 2, 0, 1]],
+    STEAM: [[0, .85, .86, .88, 0, 0, .4, 0, 1], [.08, .86, .87, .9, .55, 0, .6, 0, 1], [.6, .82, .83, .86, .3, 0, 1.4, 0, 1], [1, .8, .81, .84, 0, 0, 2, 0, 1]],
+    SPRAY: [[0, .9, .94, .97, .95, 0, .5, 0, 0], [.15, .92, .95, .98, .9, 0, .9, 0, 0], [.7, .85, .9, .94, .5, 0, 1.4, 0, 0], [1, .8, .86, .9, 0, 0, 1.7, 0, 0]],
+    MIST: [[0, .88, .9, .93, 0, 0, .5, 0, 0], [.1, .9, .92, .95, .45, 0, .7, 0, 0], [1, .86, .88, .92, 0, 0, 2, 0, 0]],
+    SPARK: [[0, 1, .95, .8, 1, 1, 1, 9, 0], [.4, 1, .65, .25, .9, 1, .9, 6, 0], [1, 1, .3, .05, 0, 1, .6, 2, 0]],
+    FLASH: [[0, 1, .96, .9, 1, 1, .6, 10, 0], [.25, 1, .8, .55, .8, 1, 1, 8, 0], [1, 1, .45, .15, 0, 1, 1.3, 2, 0]],
+    MUZZLE: [[0, 1, .9, .65, 1, 1, .6, 9, 0], [.4, 1, .55, .2, .7, 1, 1.1, 5, 0], [1, .8, .25, .08, 0, 1, 1.3, 1, 0]],
+    EXHAUST: [[0, 1, .95, .8, 1, 1, 1, 8, 0], [.5, 1, .6, .25, .6, 1, .7, 4, 0], [1, .9, .3, .1, 0, 1, .4, 1, 0]],
+    TRAIL: [[0, .9, .9, .9, 0, 0, .85, 0, 1], [.04, .92, .92, .92, .45, 0, .95, 0, 1], [.5, .86, .86, .87, .26, 0, 1.5, 0, 1], [1, .8, .8, .82, 0, 0, 2.3, 0, 1]],
+    TRACER: [[0, 1, .85, .55, 1, 1, 1, 10, 0], [1, 1, .5, .2, 0, 1, .5, 6, 0]],
+    WAKE: [[0, .92, .95, .97, 0, 0, .5, 0, 0], [.1, .94, .96, .98, .75, 0, .7, 0, 0], [1, .9, .93, .95, 0, 0, 1.6, 0, 0]],
+    EMBER: [[0, 1, .8, .4, 1, 1, 1, 9, 0], [.6, 1, .45, .1, .8, 1, .8, 5, 0], [1, .6, .15, .05, 0, 1, .4, 1, 0]],
+    GUNSMOKE: [[0, .62, .6, .58, 0, 0, .35, 0, 1], [.05, .6, .58, .56, .7, 0, .5, 0, 1], [.5, .55, .54, .53, .4, 0, 1.3, 0, 1], [1, .6, .6, .6, 0, 0, 2, 0, 1]],
+    LAUNCH_SMOKE: [[0, 1, .74, .46, .9, .45, .45, 1.5, 1], [.05, .98, .86, .7, .93, .12, .62, .45, 1], [.16, .9, .88, .84, .92, 0, .9, 0, 1], [.6, .82, .82, .81, .6, 0, 1.6, 0, 1], [1, .8, .8, .8, 0, 0, 2, 0, 1]],
+    CORDITE: [[0, 1, .66, .36, .9, .5, .45, 2.2, 1], [.06, .62, .5, .36, .85, .1, .65, .3, 1], [.3, .55, .47, .38, .7, 0, 1.1, 0, 1], [1, .6, .56, .5, 0, 0, 2, 0, 1]],
+    FW_GOLD: [[0, 1, .95, .7, 1, 1, 1, 9, 0], [.5, 1, .75, .3, .9, 1, .9, 7, 0], [1, 1, .45, .1, 0, 1, .5, 2, 0]],
+    FW_BLUE: [[0, .85, .92, 1, 1, 1, 1, 9, 0], [.4, .35, .6, 1, .9, 1, .9, 7, 0], [1, .2, .35, 1, 0, 1, .5, 2, 0]],
+    FW_ORANGE: [[0, 1, .9, .75, 1, 1, 1, 9, 0], [.4, 1, .55, .35, .9, 1, .9, 7, 0], [1, .95, .35, .2, 0, 1, .5, 2, 0]],
+    FW_WHITE: [[0, 1, 1, 1, 1, 1, 1, 10, 0], [.5, .95, .95, 1, .8, 1, .8, 6, 0], [1, .8, .85, 1, 0, 1, .5, 2, 0]],
+    FW_RED: [[0, 1, .85, .8, 1, 1, 1, 9, 0], [.4, 1, .25, .2, .9, 1, .9, 7, 0], [1, .8, .1, .08, 0, 1, .5, 2, 0]],
+    FW_GREEN: [[0, .85, 1, .85, 1, 1, 1, 9, 0], [.4, .3, 1, .45, .9, 1, .9, 7, 0], [1, .1, .7, .25, 0, 1, .5, 2, 0]],
+    // Ship fires: orange flames with darker red tips rather than a white-hot core.
+    BLAZE: [[0, 1, .78, .42, 1, 1, .5, 2.7, 0], [.15, 1, .52, .16, 1, 1, .8, 2.2, 0], [.4, .95, .32, .07, .85, .85, 1, 1.3, 0], [.65, .5, .14, .04, .55, .45, 1.15, .45, 0], [1, .1, .07, .05, 0, 0, 1.3, 0, 0]],
+};
+export const RAMP = Object.fromEntries(Object.keys(RAMP_DEFS).map((name, index) => [name, index]));
+export const FRAME = {SMOKE: [0, 1, 2, 3], FLAME: [4, 5], GLOW: 6, SPARK: 7, SPRAY: 8, COLUMN: 9, RING: 10, FLARE: 11, WISP: [12, 13], EMBER: 14, BUBBLE: 15};
+
+const CAPACITY = 12000;
+// A fresh breeze, about 13 m/s at the surface (squares are 75 m), stronger aloft (see the shear in simulate).
+const WIND = new THREE.Vector3(.17, 0, -.055);
+const CURL = {x: 0, y: 0, z: 0};
+
+// Turbulent eddies: the curl of drifting sine potentials, two octaves. A curl field has no divergence, so smoke
+// carried by it billows and curls without bunching up or thinning out, and neighbouring puffs move together.
+function curl(x, y, z, t, out) {
+    let cx = 0, cy = 0, cz = 0;
+    for (let o = 0, f = 3.2, a = 1; o < 2; o++, f *= 2.6, a *= .45) {
+        const X = x * f, Y = y * f, Z = z * f, T = t * (.35 + o * .25);
+        const dzy = Math.cos(Y * 1.27 + T * 1.4 + 1.3) * 1.27, dyz = Math.cos(Z * .93 + T * 1.1 + 4.1) * .93;
+        const dxz = Math.cos(Z * 1.11 - T * 1.3 + 2.2) * 1.11, dzx = Math.cos(X * 1.05 - T * .8 + .7) * 1.05;
+        const dyx = Math.cos(X * 1.33 + T * .7 + 5.3) * 1.33, dxy = Math.cos(Y * .87 + T * .9 + 3.6) * .87;
+        cx += (dzy - dyz) * a; cy += (dxz - dzx) * a; cz += (dyx - dxy) * a;
+    }
+    out.x = cx; out.y = cy; out.z = cz;
+}
+
+const vertexShader = /* glsl */`
+attribute vec3 iPos;
+attribute vec4 iA;   // size, rotation, life (0–1), ramp
+attribute vec4 iB;   // frame, alpha, intensity, stretch
+attribute vec3 iVel;
+uniform sampler2D uRamp;
+uniform float uRampRows;
+uniform vec3 uCamRight;
+uniform vec3 uCamUp;
+uniform vec3 uCamForward;
+varying vec2 vUv;
+varying vec4 vColor;
+varying vec4 vParams;
+varying vec3 vWorld;
+varying float vFrame;
+varying float vAlpha;
+varying float vIntensity;
+void main() {
+    float row = iA.w * 2.;
+    vec4 color = texture2D(uRamp, vec2(iA.z, (row + .5) / uRampRows));
+    vec4 params = texture2D(uRamp, vec2(iA.z, (row + 1.5) / uRampRows));
+    float size = iA.x * params.y * 2.;
+    vec2 corner = position.xy;
+    vec3 offset;
+    if (iB.w > 0.) {
+        float speed = length(iVel);
+        vec3 dir = speed > 1e-4 ? iVel / speed : uCamUp;
+        vec3 along = dir - dot(dir, uCamForward) * uCamForward;
+        float l = length(along);
+        along = l > 1e-4 ? along / l : uCamUp;
+        vec3 side = normalize(cross(along, uCamForward));
+        offset = along * corner.y * (size + speed * iB.w) + side * corner.x * size;
+    } else {
+        float c = cos(iA.y), s = sin(iA.y);
+        vec2 r = vec2(corner.x * c - corner.y * s, corner.x * s + corner.y * c) * size;
+        offset = uCamRight * r.x + uCamUp * r.y;
+    }
+    vWorld = iPos + offset;
+    gl_Position = projectionMatrix * viewMatrix * vec4(vWorld, 1.);
+    vUv = uv;
+    vColor = color;
+    vParams = params;
+    vFrame = iB.x;
+    vAlpha = iB.y;
+    vIntensity = iB.z;
+}
+`;
+
+const fragmentShader = /* glsl */`
+uniform sampler2D uAtlas;
+uniform vec3 uSunDir;
+uniform vec3 uSunColor;
+uniform vec3 uAmbient;
+uniform vec3 uCamRight;
+uniform vec3 uCamUp;
+uniform vec3 uCamForward;
+uniform vec4 uFires[4];
+uniform vec3 uFireColor;
+varying vec2 vUv;
+varying vec4 vColor;
+varying vec4 vParams;
+varying vec3 vWorld;
+varying float vFrame;
+varying float vAlpha;
+varying float vIntensity;
+void main() {
+    vec2 cell = vec2(mod(vFrame, 4.), floor(vFrame / 4.));
+    vec4 tex = texture2D(uAtlas, (cell + vUv) / 4.);
+    float additive = vParams.x;
+    float alpha = tex.a * vColor.a * vAlpha;
+    if (vParams.w > .5) alpha *= smoothstep(-.01, .1, vWorld.y);
+    if (alpha < .002) discard;
+    vec2 q = vUv * 2. - 1.;
+    vec3 n = normalize(uCamRight * q.x + uCamUp * q.y - uCamForward * sqrt(max(.05, 1. - dot(q, q))));
+    float wrap = pow(clamp(dot(n, uSunDir) * .5 + .5, 0., 1.), 1.5);
+    vec3 lit = vColor.rgb * (uAmbient + uSunColor * wrap) * mix(.38, 1.18, tex.r);
+    // Fires and blasts light the smoke around them from inside and below: the orange underside of a plume.
+    float fireLight = 0.;
+    for (int i = 0; i < 4; i++) {
+        vec4 f = uFires[i];
+        if (f.w <= 0.) continue;
+        vec3 d = f.xyz - vWorld;
+        float d2 = dot(d, d);
+        fireLight += f.w / (1. + d2 * 16.) * (.55 + .45 * clamp(dot(d * inversesqrt(d2 + 1e-4), n) * .5 + .5, 0., 1.));
+    }
+    lit += vColor.rgb * uFireColor * fireLight * mix(.45, 1.1, tex.r) * (1. - additive);
+    vec3 glow = vColor.rgb * vParams.z * 10. * vIntensity * mix(.75, 1.25, tex.r);
+    vec3 color = lit * (1. - additive) + glow;
+    gl_FragColor = vec4(color * alpha, alpha * (1. - additive));
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+}
+`;
+
+export class Effects {
+    constructor(scene, {atlas, ocean, env, onShake, onSound}) {
+        this.scene = scene;
+        this.ocean = ocean;
+        this.onShake = onShake || (() => {});
+        this.onSound = onSound || (() => {});
+        this.time = 0;
+        const n = CAPACITY;
+        const f = (k) => new Float32Array(n * k);
+        this.p = {pos: f(3), vel: f(3), age: f(1), life: f(1), size: f(1), rot: f(1), spin: f(1), ramp: f(1), frame: f(1), drag: f(1), lift: f(1), intensity: f(1), stretch: f(1), alpha: f(1), wind: f(1), swirl: f(1), seed: f(1), collide: f(1), terminal: f(1), cool: f(1), turb: f(1)};
+        this.pendingSpawns = [];
+        this.count = 0;
+        const geometry = new THREE.InstancedBufferGeometry();
+        const quad = new THREE.PlaneGeometry(1, 1);
+        geometry.index = quad.index;
+        geometry.setAttribute('position', quad.attributes.position);
+        geometry.setAttribute('uv', quad.attributes.uv);
+        this.aPos = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage);
+        this.aA = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4).setUsage(THREE.DynamicDrawUsage);
+        this.aB = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4).setUsage(THREE.DynamicDrawUsage);
+        this.aVel = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage);
+        geometry.setAttribute('iPos', this.aPos);
+        geometry.setAttribute('iA', this.aA);
+        geometry.setAttribute('iB', this.aB);
+        geometry.setAttribute('iVel', this.aVel);
+        geometry.instanceCount = 0;
+        const ramps = Object.values(RAMP_DEFS);
+        this.uniforms = {
+            uAtlas: {value: atlas},
+            uRamp: {value: rampTexture(ramps)},
+            uRampRows: {value: ramps.length * 2},
+            uSunDir: {value: env.sun.clone()},
+            uSunColor: {value: new THREE.Color(1, .97, .92).multiplyScalar(1.45)},
+            uAmbient: {value: new THREE.Color(.3, .35, .44)},
+            uCamRight: {value: new THREE.Vector3(1, 0, 0)},
+            uCamUp: {value: new THREE.Vector3(0, 1, 0)},
+            uCamForward: {value: new THREE.Vector3(0, 0, -1)},
+            uFires: {value: Array.from({length: 4}, () => new THREE.Vector4(0, 0, 0, 0))},
+            uFireColor: {value: new THREE.Color(1, .46, .16)},
+        };
+        const material = new THREE.ShaderMaterial({
+            vertexShader, fragmentShader, uniforms: this.uniforms, transparent: true, depthWrite: false,
+            blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+            blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+        });
+        this.mesh = new THREE.Mesh(geometry, material);
+        this.mesh.frustumCulled = false;
+        this.mesh.renderOrder = 10;
+        scene.add(this.mesh);
+        this.order = new Uint32Array(n);
+        this.depth = new Float32Array(n);
+        this.fires = [];
+        this.flashes = [];
+        this.emitters = [];
+        this.pending = [];
+        this.lights = Array.from({length: 6}, () => {
+            const light = new THREE.PointLight(0xffaa66, 0, 0, 2);
+            light.castShadow = false;
+            scene.add(light);
+            return light;
+        });
+        this.debris = new Debris(scene, this);
+        this.rings = new Shockwaves(scene);
+        this.flotsam = new Flotsam(scene, ocean);
+        this.tmp = new THREE.Vector3();
+    }
+
+    // Add one particle. Velocity in units/s; negative 'delay' holds it back.
+    spawn(o) {
+        if (this.count >= CAPACITY) return -1;
+        const i = this.count++;
+        const p = this.p;
+        p.pos.set([o.x, o.y, o.z], i * 3);
+        p.vel.set([o.vx || 0, o.vy || 0, o.vz || 0], i * 3);
+        p.age[i] = -(o.delay || 0);
+        p.life[i] = o.life || 1;
+        p.size[i] = o.size || .1;
+        p.rot[i] = o.rot ?? Math.random() * Math.PI * 2;
+        p.spin[i] = o.spin ?? (Math.random() - .5) * 1.2;
+        p.ramp[i] = o.ramp;
+        p.frame[i] = Array.isArray(o.frame) ? o.frame[Math.floor(Math.random() * o.frame.length)] : o.frame ?? 0;
+        p.drag[i] = o.drag ?? 1;
+        p.lift[i] = o.lift ?? 0;
+        p.intensity[i] = o.intensity ?? 1;
+        p.stretch[i] = o.stretch ?? 0;
+        p.alpha[i] = o.alpha ?? 1;
+        p.wind[i] = o.wind ?? 0;
+        p.swirl[i] = o.swirl ?? 0;
+        p.seed[i] = Math.random() * 100;
+        p.collide[i] = o.collide === true ? 1 : (o.collide || 0);
+        p.terminal[i] = o.terminal ?? 0;
+        p.cool[i] = o.cool ?? 0;
+        p.turb[i] = o.turb ?? 0;
+        return i;
+    }
+
+    kill(i) {
+        const last = --this.count;
+        if (i === last) return;
+        const p = this.p;
+        for (const key in p) {
+            const array = p[key];
+            const k = array.length / CAPACITY;
+            for (let c = 0; c < k; c++) array[i * k + c] = array[last * k + c];
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // Recipes
+    // ---------------------------------------------------------------------------------------------------
+
+    // Something new catches (a fuel line, a locker of paint, ready ammunition): the fire roars up for a moment.
+    flareUp(fire, at) {
+        const r = Math.random;
+        fire.flare = 1;
+        for (let i = 0; i < 16; i++) {
+            const dir = randomDir(.55), speed = .4 + r() * .7;
+            this.spawn({x: at.x, y: at.y + .02, z: at.z, vx: dir.x * speed * .5, vy: dir.y * speed, vz: dir.z * speed * .5, ramp: RAMP.FIRE, frame: FRAME.FLAME, size: (.07 + r() * .08) * fire.scale, life: .5 + r() * .4, drag: 2.2, lift: 2.6, cool: .4, wind: .4, turb: 1, intensity: 1});
+        }
+        for (let i = 0; i < 12; i++) {
+            const dir = randomDir(.3), speed = 1 + r() * 1.8;
+            this.spawn({x: at.x, y: at.y + .03, z: at.z, vx: dir.x * speed, vy: dir.y * speed + .6, vz: dir.z * speed, ramp: RAMP.SPARK, frame: FRAME.SPARK, size: .012, life: .4 + r() * .5, drag: .9, lift: -4, stretch: .035, collide: true});
+        }
+    }
+
+    // A falling droplet strikes the water: it presses a small ring into the ripple field and leaves a fleck of
+    // white, and a hard landing throws a smaller droplet back up out of its crown (once, as in the sea reference).
+    land(i, vy) {
+        const p = this.p, k = i * 3;
+        if (p.ramp[i] !== RAMP.SPRAY) return;
+        const ripples = this.ocean.ripples;
+        const x = p.pos[k], z = p.pos[k + 2], size = p.size[i], fall = Math.min(1, -vy / 3);
+        ripples?.push(x, z, Math.min(.7, .05 + size * 1.7) * fall, .045 + size * .22);
+        if (size > .12) ripples?.whiten(x, z, .03 + size * .3, .04 + size * .22);
+        if (p.collide[i] < 1.5 && vy < -1.3 && size > .035 && Math.random() < .55) {
+            const a = Math.random() * Math.PI * 2, kick = -vy * (.08 + Math.random() * .12);
+            this.pendingSpawns.push({x, y: .01, z, vx: Math.cos(a) * kick, vy: -vy * (.22 + Math.random() * .2), vz: Math.sin(a) * kick, ramp: RAMP.SPRAY, frame: FRAME.SPRAY, size: Math.min(.05, size * .45), life: .35 + Math.random() * .3, drag: .3, lift: -5, collide: 2, terminal: 1.4 + size * 6, stretch: .012});
+        }
+    }
+
+    // Run something a little later, on the effects clock (so it pauses and speeds up with the battle).
+    later(seconds, fn) {
+        this.pending.push({at: this.time + seconds, fn});
+    }
+
+    // A warhead, shell or bomb bursting on a ship. What it looks like follows what it was and what it struck (see
+    // BLASTS and HULLS). The physics is the same for all: a blinding flash; a fireball thrown out at blast speed
+    // and stopped by the air within metres, which then rises on its own heat, rolls and cools into soot; burning
+    // fragments on ballistic arcs; a shock front on the water and in the air; a column of black smoke.
+    explosion(at, scale = 1, {water = false, debris = true, sound = true, kind = 'missile', ship = null, waterline = false} = {}) {
+        const blast = BLASTS[kind] || BLASTS.missile;
+        const hull = HULLS[ship] || HULLS.none;
+        const {x, y, z} = at;
+        const r = Math.random;
+        // Armour keeps a small shell's blast outside the hull; a submarine's breach is half steam.
+        const fb = blast.fireball * (kind === 'gun' ? hull.armour : 1) * hull.fire;
+        const flash = blast.flash * scale;
+        this.flash(at, 9 * flash, .45, new THREE.Color(1, .66, .36));
+        this.spawn({x, y: y + .05, z, ramp: RAMP.FLASH, frame: FRAME.GLOW, size: .42 * scale * Math.sqrt(blast.flash), life: .14, drag: 0, intensity: .7});
+        this.spawn({x, y: y + .05, z, ramp: RAMP.FLASH, frame: FRAME.FLARE, size: .7 * scale * Math.sqrt(blast.flash), life: .09, drag: 0, rot: r() * 3, intensity: .6});
+        // The fireball: thrown out at blast speed and stopped by the air (high drag) at about its final radius,
+        // then lifted by its own heat (buoyancy that cools away) so it rises, rolls and turns to soot.
+        const radius = .2 * fb * Math.sqrt(scale);
+        for (let i = 0; i < 32 * fb * scale; i++) {
+            const dir = randomDir(.25), speed = radius * 6 * (.55 + r() * .7);
+            this.spawn({x: x + dir.x * .03, y: y + dir.y * .03, z: z + dir.z * .03, vx: dir.x * speed, vy: dir.y * speed, vz: dir.z * speed, ramp: RAMP.FIRE, frame: r() < .55 ? FRAME.FLAME : FRAME.SMOKE, size: (.12 + r() * .16) * fb * scale, life: .55 + r() * .75, drag: 6, lift: 1.6, cool: .9, turb: .6, intensity: .85 + r() * .5});
+        }
+        // Unburned propellant and fuel: a slower, bigger, rolling ball of burning fuel that climbs as it burns.
+        const fuel = blast.fuel * hull.fuel;
+        for (let i = 0; i < 26 * fuel * scale; i++) {
+            const dir = randomDir(.4), speed = .3 + r() * .8;
+            this.spawn({x, y: y + .04, z, vx: dir.x * speed, vy: dir.y * speed + .15, vz: dir.z * speed, ramp: r() < .55 ? RAMP.FIRE : RAMP.SMOKE_FIRE, frame: r() < .5 ? FRAME.FLAME : FRAME.SMOKE, size: (.18 + r() * .22) * scale, life: 1.1 + r() * 1.1, drag: 2.6, lift: 1, cool: 1.3, turb: .7, wind: .3, intensity: .9, delay: .03 + r() * .12});
+        }
+        // An armour-piercing shell bursts a few milliseconds inside the hull: the blast vents up through the deck
+        // as a column of flame and wreckage.
+        if (blast.vent) {
+            for (let i = 0; i < 28 * scale; i++) {
+                const a = r() * Math.PI * 2, spread = r() * .35;
+                this.spawn({x, y, z, vx: Math.cos(a) * spread, vy: 2.2 + r() * 2.6, vz: Math.sin(a) * spread, ramp: RAMP.FIRE, frame: FRAME.FLAME, size: (.09 + r() * .12) * scale, life: .45 + r() * .4, drag: 2.4, lift: 1.2, cool: .5, turb: .8, intensity: 1.1, delay: .04 + r() * .05});
+            }
+        }
+        // Black smoke climbing out of the burst on its own heat and leaning off downwind.
+        for (let i = 0; i < 18 * blast.smoke * scale; i++) {
+            const dir = randomDir(.6);
+            this.spawn({x: x + dir.x * .08 * scale, y: y + .08, z: z + dir.z * .08 * scale, vx: dir.x * .15, vy: .2 + r() * .25, vz: dir.z * .15, ramp: r() < .3 ? RAMP.SMOKE_FIRE : RAMP.SMOKE_DARK, frame: FRAME.SMOKE, size: (.26 + r() * .32) * scale, life: 9 + r() * 6, drag: 1.1, lift: .45, cool: 3, wind: 1, turb: .4, delay: .12 + r() * .6});
+        }
+        // Sparks: white-hot metal; armour sheds far more of them.
+        for (let i = 0; i < 46 * scale * hull.sparks; i++) {
+            const dir = randomDir(.15), speed = (1.8 + r() * 3.4) * scale;
+            this.spawn({x, y: y + .04, z, vx: dir.x * speed, vy: dir.y * speed + 1, vz: dir.z * speed, ramp: RAMP.SPARK, frame: FRAME.SPARK, size: .018 + r() * .02, life: .5 + r() * .9, drag: .9, lift: -4.2, stretch: .045, collide: true, intensity: .7 + r() * .6});
+        }
+        // Burning fragments on ballistic arcs, each streaking flame.
+        for (let i = 0; i < blast.rain * scale; i++) {
+            const dir = randomDir(.45), speed = (1.4 + r() * 2.2) * Math.sqrt(scale);
+            this.spawn({x, y: y + .05, z, vx: dir.x * speed, vy: dir.y * speed + .9, vz: dir.z * speed, ramp: RAMP.FIRE, frame: FRAME.FLAME, size: .04 + r() * .04, life: .9 + r() * .7, drag: .45, lift: -4.4, stretch: .03, collide: true, intensity: 1.2});
+        }
+        for (let i = 0; i < 22 * scale; i++) {
+            const dir = randomDir(.4), speed = (.4 + r() * 1.1) * scale;
+            this.spawn({x, y: y + .05, z, vx: dir.x * speed, vy: dir.y * speed + .6, vz: dir.z * speed, ramp: RAMP.EMBER, frame: FRAME.EMBER, size: .014 + r() * .016, life: 1.4 + r() * 2, drag: .8, lift: -.5, wind: .6, turb: 1.4, collide: true});
+        }
+        if (debris) this.debris.burst(at, Math.round(8 * scale * blast.debris), scale, Math.round(blast.burning * scale));
+        this.rings.ring(at, scale * 1.15, 'water');
+        if (scale * blast.flash >= .9) this.rings.ring(at, scale * .9 * Math.sqrt(blast.flash), 'air');
+        this.ocean.addImpact(x, z, .8 * scale * blast.push);
+        // A hit at the waterline throws the sea up with the fire; a submarine breach boils with steam.
+        if (water || waterline || hull.steam) this.splash({x, y: 0, z}, (water ? .7 : .55) * scale, {sound: false});
+        if (hull.steam) this.steam(at, 1.4 * scale);
+        if (debris) {
+            this.cookOffs(at, scale * hull.ordnance);
+            this.spill(at, scale * Math.max(.6, fuel));
+            // A carrier's aviation fuel and ordnance go up a moment later.
+            if (hull.secondary) this.later(.3 + r() * .4, () => this.pop(at.clone().add(new THREE.Vector3((r() - .5) * .2, .03, (r() - .5) * .2)), .75 * scale, true));
+        }
+        this.onShake(at, .5 * scale * Math.sqrt(blast.flash));
+        if (sound) this.onSound('explosion', at, scale * Math.sqrt(blast.flash));
+    }
+
+    // Ammunition and fuel cooking off: small blasts popping around a hit for a second or two afterwards.
+    cookOffs(at, scale = 1) {
+        const r = Math.random;
+        const count = 2 + Math.floor(r() * 3);
+        for (let i = 0; i < count; i++) {
+            const offset = new THREE.Vector3((r() - .5) * .34, r() * .07, (r() - .5) * .34).multiplyScalar(scale);
+            this.later(.3 + r() * 1.5, () => this.pop(at.clone().add(offset), .3 + r() * .28, i === 0));
+        }
+    }
+
+    // One small secondary blast: a flash, a puff of flame, a spray of sparks and a ball of smoke.
+    pop(at, scale = .4, sound = false) {
+        const r = Math.random;
+        const {x, y, z} = at;
+        this.flash(at, 3.4 * scale, .22, new THREE.Color(1, .68, .38));
+        this.spawn({x, y: y + .02, z, ramp: RAMP.FLASH, frame: FRAME.GLOW, size: .7 * scale, life: .14, drag: 0});
+        for (let i = 0; i < 16; i++) {
+            const dir = randomDir(.3), speed = (.5 + r() * 1.1) * scale;
+            this.spawn({x, y, z, vx: dir.x * speed, vy: dir.y * speed + .2, vz: dir.z * speed, ramp: RAMP.FIRE, frame: FRAME.FLAME, size: (.1 + r() * .12) * scale, life: .35 + r() * .35, drag: 4, lift: .4, intensity: .9 + r() * .4});
+        }
+        for (let i = 0; i < 22; i++) {
+            const dir = randomDir(.2), speed = (1.6 + r() * 2.6) * scale;
+            this.spawn({x, y, z, vx: dir.x * speed, vy: dir.y * speed + .8, vz: dir.z * speed, ramp: RAMP.SPARK, frame: FRAME.SPARK, size: .014 + r() * .014, life: .4 + r() * .6, drag: .9, lift: -4.2, stretch: .04, collide: true, intensity: .8});
+        }
+        for (let i = 0; i < 6; i++) {
+            const dir = randomDir(.6);
+            this.spawn({x, y: y + .04, z, vx: dir.x * .2, vy: .3 + r() * .25, vz: dir.z * .2, ramp: RAMP.SMOKE_FIRE, frame: FRAME.SMOKE, size: (.2 + r() * .2) * scale, life: 2.5 + r() * 2, drag: 1.4, lift: .3, wind: 1, swirl: .4, delay: r() * .1});
+        }
+        if (sound) this.onSound('explosion', at, scale * .6);
+    }
+
+    // Burning fuel thrown onto the water beside a hit; it burns out after a few seconds.
+    spill(at, scale = 1) {
+        const r = Math.random;
+        for (let i = 0; i < 3; i++) {
+            const a = r() * Math.PI * 2, d = (.14 + r() * .22) * scale;
+            const anchor = new THREE.Object3D();
+            anchor.position.set(at.x + Math.cos(a) * d, .012, at.z + Math.sin(a) * d);
+            this.scene.add(anchor);
+            this.fires.push({anchor, scale: .4 + r() * .3, flame: 0, smoke: 0, alive: true, seed: r() * 10, age: 0, life: 3.5 + r() * 4, owned: true, delay: .2 + r() * .5});
+        }
+    }
+
+    splash(at, scale = 1, {sound = true, explosive = false} = {}) {
+        const {x, z} = at;
+        const r = Math.random;
+        if (explosive) {
+            // The round bursts as it strikes the water: a short orange flash under the rising column.
+            this.flash({x, y: .05, z}, 2.6 * scale, .25, new THREE.Color(1, .66, .36));
+            this.spawn({x, y: .06, z, ramp: RAMP.FLASH, frame: FRAME.GLOW, size: .55 * scale, life: .16, drag: 0});
+            for (let i = 0; i < 12 * scale; i++) {
+                const dir = randomDir(.5), speed = (.4 + r() * .8) * scale;
+                this.spawn({x, y: .04, z, vx: dir.x * speed, vy: dir.y * speed + .3, vz: dir.z * speed, ramp: RAMP.FIRE, frame: FRAME.FLAME, size: (.08 + r() * .1) * scale, life: .3 + r() * .25, drag: 4, intensity: 1});
+            }
+        }
+        // Crown: a ring of water thrown up and out around the foot of the column.
+        for (let i = 0; i < 30 * scale; i++) {
+            const a = i / (30 * scale) * Math.PI * 2 + r() * .25, speed = (.8 + r() * .55) * Math.sqrt(scale);
+            this.spawn({x: x + Math.cos(a) * .07 * scale, y: .02, z: z + Math.sin(a) * .07 * scale, vx: Math.cos(a) * speed, vy: (1.5 + r() * .9) * Math.sqrt(scale), vz: Math.sin(a) * speed, ramp: RAMP.SPRAY, frame: FRAME.SPRAY, size: (.045 + r() * .05) * scale, life: .9 + r() * .4, drag: .3, lift: -5, stretch: .014, collide: true, terminal: 1.6 + r() * 1.4});
+        }
+        // Base surge: low mist rolling out across the water as the column collapses.
+        for (let i = 0; i < 20 * scale; i++) {
+            const a = r() * Math.PI * 2, speed = (.8 + r() * .7) * scale;
+            this.spawn({x, y: .05, z, vx: Math.cos(a) * speed, vy: .05 + r() * .08, vz: Math.sin(a) * speed, ramp: RAMP.MIST, frame: FRAME.SMOKE, size: (.16 + r() * .14) * scale, life: 2 + r() * 1.4, drag: 1.3, wind: .5, delay: .55 + r() * .35});
+        }
+        for (let i = 0; i < 70 * scale; i++) {
+            const a = r() * Math.PI * 2, spread = (.06 + r() * .32) * scale;
+            const up = (1.3 + Math.pow(r(), .7) * 2.1) * Math.sqrt(scale);
+            const size = (.15 + r() * .24) * scale;
+            this.spawn({x: x + Math.cos(a) * spread * .5, y: .02, z: z + Math.sin(a) * spread * .5, vx: Math.cos(a) * spread * .9, vy: up, vz: Math.sin(a) * spread * .9, ramp: RAMP.SPRAY, frame: r() < .6 ? FRAME.COLUMN : FRAME.SPRAY, size, life: 1.3 + r() * 1.1, drag: .2, lift: -5.2, collide: true, terminal: 3.2 + size * 6});
+        }
+        for (let i = 0; i < 16 * scale; i++) {
+            const a = r() * Math.PI * 2, d = r() * .2 * scale;
+            this.spawn({x: x + Math.cos(a) * d, y: .05, z: z + Math.sin(a) * d, vx: Math.cos(a) * .35, vy: .5 + r() * .6, vz: Math.sin(a) * .35, ramp: RAMP.SPRAY, frame: FRAME.SMOKE, size: (.22 + r() * .2) * scale, life: .9 + r() * .5, drag: 1.4, lift: -1.5});
+        }
+        for (let i = 0; i < 46 * scale; i++) {
+            const a = r() * Math.PI * 2, speed = (.7 + r() * 1.1) * scale;
+            const size = (.05 + r() * .09) * scale;
+            this.spawn({x, y: .02, z, vx: Math.cos(a) * speed, vy: 1.1 + r() * 1.4, vz: Math.sin(a) * speed, ramp: RAMP.SPRAY, frame: FRAME.SPRAY, size, life: .8 + r() * .6, drag: .2, lift: -5, collide: true, terminal: 1.3 + size * 14, stretch: .014});
+        }
+        for (let i = 0; i < 12 * scale; i++) {
+            const a = r() * Math.PI * 2;
+            this.spawn({x: x + Math.cos(a) * .1, y: .1 + r() * .5 * scale, z: z + Math.sin(a) * .1, vx: Math.cos(a) * .2, vy: .2 + r() * .35, vz: Math.sin(a) * .2, ramp: RAMP.MIST, frame: FRAME.SMOKE, size: (.35 + r() * .35) * scale, life: 2.6 + r() * 1.8, drag: .9, lift: .05, wind: .8, delay: .25 + r() * .4});
+        }
+        this.ocean.addImpact(x, z, 1.05 * scale);
+        this.rings.ring({x, y: .01, z}, scale * .7, 'water');
+        if (sound) this.onSound('splash', at, scale);
+    }
+
+    muzzle(at, dir, scale = 1) {
+        const r = Math.random;
+        const {x, y, z} = at;
+        this.flash(at, 3.2 * scale, .18, new THREE.Color(1, .7, .4));
+        this.spawn({x, y, z, ramp: RAMP.MUZZLE, frame: FRAME.FLARE, size: .45 * scale, life: .12, drag: 0, rot: r() * 3});
+        this.spawn({x: x + dir.x * .1 * scale, y: y + dir.y * .1 * scale, z: z + dir.z * .1 * scale, ramp: RAMP.MUZZLE, frame: FRAME.GLOW, size: .55 * scale, life: .14, drag: 0});
+        for (let i = 0; i < 12 * scale; i++) {
+            const speed = (2.5 + r() * 3) * scale;
+            const jitter = randomDir(0).multiplyScalar(.25);
+            this.spawn({x, y, z, vx: (dir.x + jitter.x) * speed, vy: (dir.y + jitter.y) * speed, vz: (dir.z + jitter.z) * speed, ramp: RAMP.FIRE, frame: FRAME.FLAME, size: (.06 + r() * .08) * scale, life: .18 + r() * .14, drag: 9, intensity: 1.2});
+        }
+        const heavy = scale > 1.4;
+        // The blast cloud: thrown out fast, stopped by the air within a few tens of metres, then it hangs and drifts.
+        for (let i = 0; i < (heavy ? 44 : 18) * scale; i++) {
+            const speed = (.8 + r() * 2.2) * scale;
+            const jitter = randomDir(0).multiplyScalar(.5);
+            this.spawn({x, y, z, vx: (dir.x + jitter.x) * speed, vy: (dir.y + jitter.y) * speed + .1, vz: (dir.z + jitter.z) * speed, ramp: heavy ? RAMP.CORDITE : RAMP.GUNSMOKE, frame: FRAME.SMOKE, size: (.08 + r() * .14) * scale, life: (heavy ? 5 : 2.2) + r() * 2.5, drag: heavy ? 7.5 : 2.6, lift: .06, wind: 1, swirl: .35});
+        }
+        if (heavy) {
+            // The 16-inch fireball: a ball of flame thrown out ahead of the muzzle.
+            for (let i = 0; i < 26; i++) {
+                const speed = (2 + r() * 4) * scale * .6;
+                const jitter = randomDir(0).multiplyScalar(.35);
+                this.spawn({x, y, z, vx: (dir.x + jitter.x) * speed, vy: (dir.y + jitter.y) * speed, vz: (dir.z + jitter.z) * speed, ramp: RAMP.FIRE, frame: r() < .5 ? FRAME.FLAME : FRAME.SMOKE, size: (.12 + r() * .14) * scale, life: .3 + r() * .3, drag: 5, intensity: 1.5});
+            }
+        }
+        if (scale > .9) {
+            this.ocean.addImpact(x + dir.x * .4, z + dir.z * .4, .45 * scale);
+            this.rings.ring({x: x + dir.x * .3, y: .01, z: z + dir.z * .3}, .6 * scale, 'water');
+        }
+    }
+
+    steam(at, scale = 1) {
+        const r = Math.random;
+        for (let i = 0; i < 20 * scale; i++) {
+            this.spawn({x: at.x + (r() - .5) * .2, y: .03, z: at.z + (r() - .5) * .2, vx: (r() - .5) * .2, vy: .4 + r() * .6, vz: (r() - .5) * .2, ramp: RAMP.STEAM, frame: FRAME.SMOKE, size: (.12 + r() * .16) * scale, life: 2 + r() * 2, drag: 1.2, lift: .25, wind: 1, swirl: .4});
+        }
+    }
+
+    bubbles(at, radius, scale = 1) {
+        const r = Math.random;
+        for (let i = 0; i < 6 * scale; i++) {
+            const a = r() * Math.PI * 2, d = r() * radius;
+            this.spawn({x: at.x + Math.cos(a) * d, y: .01, z: at.z + Math.sin(a) * d, vx: 0, vy: .25 + r() * .5, vz: 0, ramp: RAMP.WAKE, frame: r() < .5 ? FRAME.SPRAY : FRAME.BUBBLE, size: .05 + r() * .08, life: .6 + r() * .6, drag: 1.5, lift: -1.2});
+        }
+    }
+
+    // Trails for projectiles. Smoke is laid down by distance travelled since the last frame (from → at), so a
+    // trail stays continuous at any speed or frame rate instead of breaking into beads.
+    trail(kind, at, velocity, dt, progress = 0, from = at, projectile = null) {
+        const r = Math.random;
+        const speed = velocity.length();
+        const dir = speed > 1e-5 ? velocity.clone().divideScalar(speed) : new THREE.Vector3(0, 1, 0);
+        const back = dir.clone().negate();
+        const travelled = from.distanceTo(at);
+        const along = (spacing, fn) => {
+            const n = Math.min(48, Math.ceil(travelled / spacing));
+            for (let i = 0; i < n; i++) {
+                const k = (i + r()) / n;
+                fn(from.x + (at.x - from.x) * k, from.y + (at.y - from.y) * k, from.z + (at.z - from.z) * k);
+            }
+        };
+        if (kind === 'shell') {
+            // A glowing tracer streak, and a thin wake of hot gas and propellant smoke behind the shell.
+            this.spawn({x: at.x, y: at.y, z: at.z, vx: velocity.x * .02, vy: velocity.y * .02, vz: velocity.z * .02, ramp: RAMP.TRACER, frame: FRAME.SPARK, size: .11, life: .12, drag: 0, stretch: .03, intensity: 1.6});
+            this.spawn({x: at.x, y: at.y, z: at.z, vx: velocity.x, vy: velocity.y, vz: velocity.z, ramp: RAMP.TRACER, frame: FRAME.GLOW, size: .13, life: Math.min(.034, dt * 1.05), drag: 0, intensity: 1.2});
+            along(.045, (x, y, z) => this.spawn({x, y, z, vx: (r() - .5) * .05, vy: (r() - .5) * .05, vz: (r() - .5) * .05, ramp: RAMP.GUNSMOKE, frame: FRAME.WISP, size: .03 + r() * .025, life: .6 + r() * .5, drag: 2, wind: .5, alpha: .4}));
+        } else if (kind === 'missile') {
+            const tail = at.clone().addScaledVector(back, .07);
+            const boost = progress < .3;
+            // The motor: a white-hot core, a long flame, and shock diamonds standing in the plume.
+            const life = Math.min(.034, dt * 1.05);
+            const ride = {vx: velocity.x, vy: velocity.y, vz: velocity.z, drag: 0};
+            this.spawn({x: tail.x, y: tail.y, z: tail.z, ...ride, ramp: RAMP.EXHAUST, frame: FRAME.FLARE, size: .17 + r() * .05, life, intensity: .9, rot: r() * 3});
+            this.spawn({x: tail.x, y: tail.y, z: tail.z, ...ride, ramp: RAMP.EXHAUST, frame: FRAME.GLOW, size: .12, life, intensity: .9});
+            for (let d = 1; d <= 4; d++) {
+                const flicker = .8 + r() * .4;
+                this.spawn({x: tail.x + back.x * d * .042, y: tail.y + back.y * d * .042, z: tail.z + back.z * d * .042, ...ride, ramp: RAMP.EXHAUST, frame: FRAME.GLOW, size: (.05 - d * .008) * flicker, life, intensity: (1.5 - d * .28) * flicker});
+            }
+            this.spawn({x: tail.x, y: tail.y, z: tail.z, vx: back.x * 5, vy: back.y * 5, vz: back.z * 5, ramp: RAMP.EXHAUST, frame: FRAME.FLAME, size: .05, life: .06, drag: 0, stretch: .025, intensity: 1.3});
+            for (let i = 0; i < 3; i++) this.spawn({x: tail.x, y: tail.y, z: tail.z, vx: back.x * 2.4 + (r() - .5) * .25, vy: back.y * 2.4 + (r() - .5) * .25, vz: back.z * 2.4 + (r() - .5) * .25, ramp: RAMP.EXHAUST, frame: FRAME.FLAME, size: .07 + r() * .06, life: .1 + r() * .07, drag: 4, intensity: 1.5});
+            // Smoke: dense and billowing while boosting off the rail, a thinner trail once cruising. Each puff
+            // starts small and hot behind the nozzle, spreads, and drifts off on the wind.
+            const tailFrom = from.clone().addScaledVector(back, .07);
+            const seg = {x0: tailFrom.x, y0: tailFrom.y, z0: tailFrom.z};
+            const n = Math.min(72, Math.ceil(travelled / (boost ? .011 : .012)));
+            for (let i = 0; i < n; i++) {
+                const k = (i + r()) / n, spread = boost ? .22 : .08;
+                this.spawn({x: seg.x0 + (tail.x - seg.x0) * k + (r() - .5) * .02, y: seg.y0 + (tail.y - seg.y0) * k + (r() - .5) * .02, z: seg.z0 + (tail.z - seg.z0) * k + (r() - .5) * .02, vx: back.x * .25 + (r() - .5) * spread, vy: back.y * .25 + (r() - .5) * spread, vz: back.z * .25 + (r() - .5) * spread, ramp: boost ? RAMP.LAUNCH_SMOKE : RAMP.TRAIL, frame: FRAME.SMOKE, size: (boost ? .085 : .068) + r() * .018, life: (boost ? 11 : 8) + r() * 4, drag: 1.4, lift: .1, cool: 4, wind: .9, turb: .12});
+            }
+        } else if (kind === 'jet') {
+            // Afterburner, a faint exhaust trail, and vortices streaming off the wingtips in hard turns.
+            const tail = at.clone().addScaledVector(back, .1);
+            this.spawn({x: tail.x, y: tail.y, z: tail.z, ramp: RAMP.EXHAUST, frame: FRAME.GLOW, size: .07, life: .06, drag: 0, intensity: 1.5});
+            this.spawn({x: tail.x, y: tail.y, z: tail.z, vx: back.x * 3, vy: back.y * 3, vz: back.z * 3, ramp: RAMP.EXHAUST, frame: FRAME.FLAME, size: .03, life: .05, drag: 0, stretch: .02, intensity: 1.2});
+            along(.05, (x, y, z) => this.spawn({x: x + back.x * .14, y, z: z + back.z * .14, ramp: RAMP.TRAIL, frame: FRAME.WISP, size: .028, life: 1.4, drag: 1, alpha: .45, wind: .4}));
+            const bank = Math.abs(projectile?.bank || 0);
+            if (bank > .35) {
+                const side = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(.075);
+                along(.03, (x, y, z) => {
+                    for (const s of [1, -1]) this.spawn({x: x + side.x * s, y, z: z + side.z * s, ramp: RAMP.TRAIL, frame: FRAME.WISP, size: .012, life: .9, drag: 1.2, alpha: Math.min(1, (bank - .35) * 2) * .7, wind: .3});
+                });
+            }
+        } else if (kind === 'torpedo') {
+            for (let i = 0; i < 2; i++) this.spawn({x: at.x + (r() - .5) * .05, y: .015, z: at.z + (r() - .5) * .05, vx: 0, vy: .08 + r() * .12, vz: 0, ramp: RAMP.WAKE, frame: r() < .5 ? FRAME.SPRAY : FRAME.BUBBLE, size: .05 + r() * .05, life: 1.6 + r() * .8, drag: 2, lift: -.1});
+        } else if (kind === 'bomb') {
+            // Air streaming off the fins as it falls.
+            along(.05, (x, y, z) => this.spawn({x, y, z, ramp: RAMP.GUNSMOKE, frame: FRAME.WISP, size: .016, life: .45, drag: 2, alpha: .35}));
+        } else if (kind === 'rocket') {
+            this.spawn({x: at.x, y: at.y, z: at.z, vx: -velocity.x * .1, vy: -velocity.y * .1, vz: -velocity.z * .1, ramp: RAMP.SPARK, frame: FRAME.SPARK, size: .03, life: .35, drag: 1, stretch: .02});
+        }
+    }
+
+    firework(at, ramp, scale = 1) {
+        const r = Math.random;
+        this.flash(at, 6 * scale, .5, new THREE.Color(1, .85, .6));
+        this.spawn({x: at.x, y: at.y, z: at.z, ramp, frame: FRAME.GLOW, size: .9 * scale, life: .35, drag: 0});
+        const count = Math.round(110 * scale);
+        for (let i = 0; i < count; i++) {
+            const dir = randomDir(-1);
+            const speed = (1.4 + r() * .4) * scale;
+            this.spawn({x: at.x, y: at.y, z: at.z, vx: dir.x * speed, vy: dir.y * speed, vz: dir.z * speed, ramp, frame: FRAME.SPARK, size: .03, life: 1.5 + r() * .9, drag: 1.4, lift: -.55, stretch: .05, intensity: 1});
+        }
+        for (let i = 0; i < 40 * scale; i++) {
+            const dir = randomDir(-1);
+            this.spawn({x: at.x, y: at.y, z: at.z, vx: dir.x * .8, vy: dir.y * .8, vz: dir.z * .8, ramp: RAMP.FW_WHITE, frame: FRAME.EMBER, size: .018, life: 1.2 + r() * 1.4, drag: 1, lift: -.4, delay: .4 + r() * .9});
+        }
+        this.onSound('firework', at, scale);
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+    // Persistent fires and lights
+    // ---------------------------------------------------------------------------------------------------
+
+    addFire(anchor, scale = 1) {
+        const fire = {anchor, scale, flame: 0, smoke: 0, alive: true, seed: Math.random() * 10, age: 0};
+        this.fires.push(fire);
+        return fire;
+    }
+
+    flash(at, intensity, duration, color) {
+        this.flashes.push({position: new THREE.Vector3(at.x, at.y + .3, at.z), intensity, duration, t: 0, color: color || new THREE.Color(1, .7, .4)});
+    }
+
+    // A light that rides along with something (a missile's motor), steady until it fades at the end.
+    follow(getPosition, intensity, duration, color) {
+        this.flashes.push({position: getPosition().clone(), follow: getPosition, steady: true, intensity, duration, t: 0, color: color || new THREE.Color(1, .82, .6)});
+    }
+
+    // A vertical launch: fire blows out of the cell and across the deck, and a towering column of dense
+    // smoke, lit orange from inside, climbs after the missile and rolls over the bow.
+    vlsLaunch(at, scale = 1) {
+        const r = Math.random;
+        const {x, y, z} = at;
+        this.flash(at, 2.2 * scale, 1.1, new THREE.Color(1, .74, .45));
+        this.spawn({x, y: y + .1, z, ramp: RAMP.FLASH, frame: FRAME.GLOW, size: .55 * scale, life: .3, drag: 0, intensity: .45});
+        this.spawn({x, y: y + .15, z, ramp: RAMP.FLASH, frame: FRAME.FLARE, size: .8 * scale, life: .18, drag: 0, rot: r() * 3, intensity: .5});
+        for (let i = 0; i < 30 * scale; i++) {
+            const a = r() * Math.PI * 2, spread = r() * .45;
+            this.spawn({x: x + Math.cos(a) * .03, y: y + .02, z: z + Math.sin(a) * .03, vx: Math.cos(a) * spread, vy: .6 + r() * 2.2, vz: Math.sin(a) * spread, ramp: RAMP.FIRE, frame: r() < .6 ? FRAME.FLAME : FRAME.SMOKE, size: (.1 + r() * .2) * scale, life: .45 + r() * .5, drag: 2.4, lift: 1.6, cool: .35, turb: .9, intensity: .75});
+        }
+        // Exhaust deflected off the deck.
+        for (let i = 0; i < 20 * scale; i++) {
+            const a = r() * Math.PI * 2, speed = 1 + r() * 1.6;
+            this.spawn({x, y: y + .02, z, vx: Math.cos(a) * speed, vy: .1 + r() * .3, vz: Math.sin(a) * speed, ramp: RAMP.FIRE, frame: FRAME.FLAME, size: (.06 + r() * .1) * scale, life: .25 + r() * .25, drag: 4.5, intensity: .8});
+        }
+        // Solid-rocket exhaust is dense white aluminium-oxide smoke. The column is thrown up out of the cell at
+        // blast speed and stopped by the air within tens of metres (high drag); then it rises on its own heat,
+        // billows in the eddies and drifts downwind for a long time, lit orange by the motor at first.
+        for (let i = 0; i < 150 * scale; i++) {
+            const a = r() * Math.PI * 2, spread = r() * .35;
+            this.spawn({x: x + Math.cos(a) * .05, y: y + .05, z: z + Math.sin(a) * .05, vx: Math.cos(a) * spread, vy: .4 + Math.pow(r(), .5) * 5.5, vz: Math.sin(a) * spread, ramp: RAMP.LAUNCH_SMOKE, frame: FRAME.SMOKE, size: (.13 + r() * .2) * scale, life: 10 + r() * 7, drag: 2.6, lift: .5, cool: 3.5, wind: 1, turb: .45, delay: r() * .7});
+        }
+        // Exhaust deflected off the deck spreads out across it and rolls over the sides, low and slow to rise.
+        for (let i = 0; i < 80 * scale; i++) {
+            const a = r() * Math.PI * 2, speed = .6 + r() * 1.8;
+            this.spawn({x, y: y + .05, z, vx: Math.cos(a) * speed, vy: .02 + r() * .15, vz: Math.sin(a) * speed, ramp: RAMP.LAUNCH_SMOKE, frame: FRAME.SMOKE, size: (.16 + r() * .24) * scale, life: 8 + r() * 6, drag: 2.2, lift: .25, cool: 5, wind: 1, turb: .35, delay: r() * .35});
+        }
+        for (let i = 0; i < 30 * scale; i++) {
+            const dir = randomDir(.4);
+            const speed = 1.5 + r() * 3;
+            this.spawn({x, y: y + .05, z, vx: dir.x * speed * .5, vy: dir.y * speed, vz: dir.z * speed * .5, ramp: RAMP.SPARK, frame: FRAME.SPARK, size: .018, life: .5 + r() * .6, drag: 1, lift: -3, stretch: .04, collide: true});
+        }
+        this.onShake(at, .35 * scale);
+    }
+
+    clear() {
+        this.count = 0;
+        for (const fire of this.fires) if (fire.owned) this.scene.remove(fire.anchor);
+        this.fires = [];
+        this.pending = [];
+        this.flashes = [];
+        this.debris.clear();
+        this.flotsam.clear();
+    }
+
+    update(dt, camera) {
+        this.time += dt;
+        const r = Math.random;
+        const world = this.tmp;
+        // Fires: flames lick upward, black smoke climbs and drifts downwind; under water they hiss out.
+        const due = this.pending.filter(item => item.at <= this.time);
+        if (due.length) {
+            this.pending = this.pending.filter(item => item.at > this.time);
+            for (const item of due) item.fn();
+        }
+        for (const fire of this.fires) {
+            if (!fire.alive) continue;
+            fire.age += dt;
+            if (fire.delay && fire.age < fire.delay) continue;
+            if (fire.life && fire.age >= fire.life) {
+                fire.alive = false;
+                if (fire.owned) this.scene.remove(fire.anchor);
+                continue;
+            }
+            fire.anchor.getWorldPosition(world);
+            if (world.y < -.015) {
+                fire.alive = false;
+                this.steam(world, 1.2);
+                continue;
+            }
+            // A ship fire after the empirical fire-plume laws. It takes hold over a few seconds and flares up now
+            // and then; spilled fuel dies down at the end.
+            const burning = fire.age - (fire.delay || 0);
+            const growth = 1 - Math.exp(-burning / 2.2);
+            fire.flare = Math.max(0, (fire.flare || 0) - dt * .7);
+            if (!fire.life && burning > 2 && r() < dt / 6.5) this.flareUp(fire, world);
+            const fade = fire.life ? Math.min(1, (fire.life - fire.age) / 1.5) : 1;
+            const s = fire.scale * (.3 + .7 * growth) * fade * (1 + fire.flare * .7);
+            fire.level = s / fire.scale;
+            // Pool fires puff: the flame column pulses at about 1.5 / sqrt(D) Hz for a fire D metres across.
+            const across = Math.max(1, .06 * s * 75);
+            const puff = .5 + .5 * Math.sin(burning * 1.5 / Math.sqrt(across) * Math.PI * 2 + fire.seed * 7);
+            fire.flame += dt * 24 * s * (.65 + .7 * puff);
+            fire.smoke += dt * 16 * s;
+            const base = .035 * s;
+            while (fire.flame >= 1) {
+                fire.flame -= 1;
+                // Flames rise on their own buoyancy, about twice gravity in the hot core, which dies away as they
+                // mix and cool; the wind leans them over. Their life sets the flame height, which grows as
+                // Heskestad's L ~ Q^0.4 does with the fire's size.
+                const a = r() * Math.PI * 2, d = Math.sqrt(r()) * base;
+                this.spawn({x: world.x + Math.cos(a) * d, y: world.y + .005, z: world.z + Math.sin(a) * d, vx: (r() - .5) * .04, vy: .08 + puff * .1 + r() * .05, vz: (r() - .5) * .04, ramp: r() < .7 ? RAMP.BLAZE : RAMP.FIRE, frame: FRAME.FLAME, size: (.06 + r() * .07) * Math.pow(s, .7), life: (.45 + r() * .35) * Math.pow(s, .35) * (.85 + puff * .3), drag: 1.2, lift: 1, cool: .35, wind: .45, turb: .4, intensity: .55 + r() * .35});
+            }
+            while (fire.smoke >= 1) {
+                fire.smoke -= 1;
+                // Smoke leaves the flame tips in a buoyant plume: quick and hot at first, slowing and widening
+                // as it draws in air, then drifting off on the wind for many seconds. Some of it is still lit
+                // orange from below.
+                const top = world.y + .14 * Math.pow(s, .8) + r() * .05;
+                this.spawn({x: world.x + (r() - .5) * base, y: top, z: world.z + (r() - .5) * base, vx: (r() - .5) * .03, vy: .12 + r() * .08, vz: (r() - .5) * .03, ramp: r() < .14 ? RAMP.SMOKE_FIRE : RAMP.SMOKE_DARK, frame: FRAME.SMOKE, size: (.12 + r() * .08) * Math.pow(s, .8), life: 10 + r() * 6, drag: .7, lift: .22, cool: 4, wind: 1, turb: .25});
+            }
+            if (r() < dt * 4 * s) this.spawn({x: world.x + (r() - .5) * base, y: world.y + .03, z: world.z + (r() - .5) * base, vx: (r() - .5) * .15, vy: .2 + r() * .25, vz: (r() - .5) * .15, ramp: RAMP.EMBER, frame: FRAME.EMBER, size: .011, life: 2.2 + r() * 1.6, drag: .6, lift: .3, cool: 1, wind: .9, turb: .8});
+            // A fire that has burned a while catches the deck beside it (once).
+            if (!fire.life && !fire.spread && burning > 9 + fire.seed && fire.anchor.parent && this.fires.length < 40) {
+                fire.spread = true;
+                const next = new THREE.Object3D();
+                next.position.copy(fire.anchor.position).add(new THREE.Vector3((r() - .5) * .16, 0, (r() - .5) * .05));
+                fire.anchor.parent.add(next);
+                this.fires.push({anchor: next, scale: fire.scale * .65, flame: 0, smoke: 0, alive: true, seed: r() * 10, age: 0, spread: true});
+            }
+        }
+        this.fires = this.fires.filter(f => f.alive);
+        for (const flash of this.flashes) flash.t += dt;
+        this.flashes = this.flashes.filter(f => f.t < f.duration);
+        this.assignLights(camera);
+        this.simulate(dt, camera);
+        this.debris.update(dt);
+        this.rings.update(dt);
+        this.flotsam.update(dt, this.time);
+    }
+
+    assignLights(camera) {
+        const requests = [];
+        for (const flash of this.flashes) {
+            const k = 1 - flash.t / flash.duration;
+            if (flash.follow) flash.position.copy(flash.follow());
+            const level = flash.steady ? Math.min(1, k * 5) : k * k;
+            requests.push({position: flash.position, intensity: flash.intensity * level, color: flash.color, priority: 1000});
+        }
+        const camPos = camera.position;
+        for (const fire of this.fires) {
+            if (fire.delay && fire.age < fire.delay) continue;
+            const position = fire.anchor.getWorldPosition(new THREE.Vector3());
+            position.y += .22;
+            const flicker = .72 + .18 * Math.sin(this.time * 13 + fire.seed) + .1 * Math.sin(this.time * 31 + fire.seed * 3);
+            requests.push({position, intensity: .45 * fire.scale * flicker * (fire.level ?? .3), color: FIRE_LIGHT, priority: 10 / (1 + position.distanceTo(camPos))});
+        }
+        requests.sort((a, b) => b.priority - a.priority);
+        const glow = this.uniforms.uFires.value;
+        for (let i = 0; i < 4; i++) {
+            const request = requests[i];
+            if (request) glow[i].set(request.position.x, request.position.y, request.position.z, Math.min(2, request.intensity * .3));
+            else glow[i].w = 0;
+        }
+        this.activeLights = [];
+        this.lights.forEach((light, i) => {
+            const request = requests[i];
+            if (!request) {
+                light.intensity = 0;
+                return;
+            }
+            light.position.copy(request.position);
+            light.color.copy(request.color);
+            light.intensity = request.intensity;
+            this.activeLights.push(light);
+        });
+        this.ocean.setLights(this.lights);
+    }
+
+    simulate(dt, camera) {
+        const p = this.p;
+        const t = this.time;
+        for (let i = 0; i < this.count; i++) {
+            p.age[i] += dt;
+            if (p.age[i] < 0) continue;
+            if (p.age[i] >= p.life[i]) {
+                this.kill(i);
+                i--;
+                continue;
+            }
+            const k = i * 3;
+            const drag = Math.exp(-p.drag[i] * dt);
+            const wind = p.wind[i];
+            const swirl = p.swirl[i];
+            const seed = p.seed[i];
+            let vx = p.vel[k] * drag, vy = p.vel[k + 1] * drag, vz = p.vel[k + 2] * drag;
+            // Hot gas rises on its own buoyancy; as it mixes with the air and cools, the lift dies away.
+            const cool = p.cool[i];
+            vy += (cool > 0 ? p.lift[i] * Math.exp(-p.age[i] / cool) : p.lift[i]) * dt;
+            const terminal = p.terminal[i];
+            if (terminal > 0) {
+                const resist = 1 + dt * Math.max(1, -p.lift[i]) * Math.hypot(vx, vy, vz) / (terminal * terminal);
+                vx /= resist; vy /= resist; vz /= resist;
+            }
+            if (wind) {
+                // The wind strengthens with height above the sea (a logarithmic profile), so tall smoke columns
+                // and trails lean over and shear.
+                const shear = .55 + .45 * Math.log1p(Math.max(0, p.pos[k + 1]) * 3);
+                vx += (WIND.x * shear - vx) * wind * dt * .6;
+                vz += (WIND.z * shear - vz) * wind * dt * .6;
+            }
+            const turb = p.turb[i];
+            if (turb) {
+                curl(p.pos[k] + seed * .011, p.pos[k + 1], p.pos[k + 2], t, CURL);
+                vx += CURL.x * turb * dt * .22;
+                vy += CURL.y * turb * dt * .13;
+                vz += CURL.z * turb * dt * .22;
+            }
+            if (swirl) {
+                const y = p.pos[k + 1];
+                vx += Math.sin(y * 7 + t * 1.3 + seed) * swirl * dt * .35;
+                vz += Math.cos(y * 6 + t * 1.1 + seed * 1.7) * swirl * dt * .35;
+            }
+            p.vel[k] = vx; p.vel[k + 1] = vy; p.vel[k + 2] = vz;
+            p.pos[k] += vx * dt;
+            p.pos[k + 1] += vy * dt;
+            p.pos[k + 2] += vz * dt;
+            p.rot[i] += p.spin[i] * dt;
+            if (p.collide[i] && p.pos[k + 1] < 0 && vy < 0) {
+                this.land(i, vy);
+                this.kill(i);
+                i--;
+            }
+        }
+        for (const o of this.pendingSpawns) this.spawn(o);
+        this.pendingSpawns = [];
+        // Sort back to front.
+        const n = this.count;
+        const e = camera.matrixWorldInverse.elements;
+        for (let i = 0; i < n; i++) {
+            const k = i * 3;
+            this.depth[i] = e[2] * p.pos[k] + e[6] * p.pos[k + 1] + e[10] * p.pos[k + 2];
+            this.order[i] = i;
+        }
+        const depth = this.depth;
+        const order = this.order.subarray(0, n).sort((a, b) => depth[a] - depth[b]);
+        const pos = this.aPos.array, A = this.aA.array, B = this.aB.array, V = this.aVel.array;
+        for (let j = 0; j < n; j++) {
+            const i = order[j], k = i * 3;
+            const life = Math.max(0, p.age[i]) / p.life[i];
+            pos[j * 3] = p.pos[k]; pos[j * 3 + 1] = p.pos[k + 1]; pos[j * 3 + 2] = p.pos[k + 2];
+            V[j * 3] = p.vel[k]; V[j * 3 + 1] = p.vel[k + 1]; V[j * 3 + 2] = p.vel[k + 2];
+            A[j * 4] = p.size[i]; A[j * 4 + 1] = p.rot[i]; A[j * 4 + 2] = life; A[j * 4 + 3] = p.ramp[i];
+            B[j * 4] = p.frame[i]; B[j * 4 + 1] = p.age[i] < 0 ? 0 : p.alpha[i]; B[j * 4 + 2] = p.intensity[i]; B[j * 4 + 3] = p.stretch[i];
+        }
+        for (const attribute of [this.aPos, this.aA, this.aB, this.aVel]) {
+            attribute.clearUpdateRanges();
+            attribute.addUpdateRange(0, n * attribute.itemSize);
+            attribute.needsUpdate = true;
+        }
+        this.mesh.geometry.instanceCount = n;
+        // Billboard basis.
+        const m = camera.matrixWorld.elements;
+        this.uniforms.uCamRight.value.set(m[0], m[1], m[2]).normalize();
+        this.uniforms.uCamUp.value.set(m[4], m[5], m[6]).normalize();
+        this.uniforms.uCamForward.value.set(-m[8], -m[9], -m[10]).normalize();
+    }
+}
+
+const FIRE_LIGHT = new THREE.Color(1, .55, .22);
+
+// What each weapon does when it bursts on a ship.
+//   gun: a 5-inch or 57 mm high-explosive shell, a sharp, small burst.
+//   salvo: 16-inch armour-piercing shells, which burst inside the hull and vent up through the deck.
+//   missile / subMissile: a 200 kg warhead plus the unburned propellant in the motor: a rolling fuel fireball,
+//     a rain of burning fragments and thick black smoke.
+//   strike: a 900 kg bomb, the biggest fireball, debris column and shock front.
+//   secondary: magazines and fuel tanks going up as a ship founders.
+const BLASTS = {
+    gun: {fireball: .7, fuel: .1, smoke: .7, flash: .7, debris: .6, burning: 1, rain: 5, push: .6},
+    salvo: {fireball: 1.15, fuel: .3, smoke: 1.2, flash: 1.25, debris: 1.5, burning: 3, rain: 10, push: 1.1, vent: true},
+    missile: {fireball: 1.05, fuel: 1, smoke: 1.35, flash: 1, debris: 1, burning: 4, rain: 22, push: 1},
+    subMissile: {fireball: 1.05, fuel: 1, smoke: 1.35, flash: 1, debris: 1, burning: 4, rain: 22, push: 1},
+    strike: {fireball: 1.45, fuel: .5, smoke: 1.6, flash: 1.5, debris: 1.7, burning: 5, rain: 16, push: 1.4},
+    secondary: {fireball: .95, fuel: 1.2, smoke: 1.2, flash: .9, debris: .9, burning: 3, rain: 14, push: .9},
+    torpedo: {fireball: .8, fuel: .2, smoke: .9, flash: .9, debris: 1, burning: 1, rain: 6, push: 1.3},
+};
+// How each ship takes it: fuel and ordnance aboard, armour, what its superstructure is made of.
+const HULLS = {
+    Carrier: {fire: 1, fuel: 1.4, armour: .9, sparks: 1, ordnance: 1.6, secondary: true},
+    Battleship: {fire: 1, fuel: .8, armour: .55, sparks: 1.8, ordnance: 1.2},
+    Cruiser: {fire: 1.1, fuel: 1, armour: 1, sparks: 1, ordnance: 1},
+    Destroyer: {fire: 1.15, fuel: 1, armour: 1, sparks: 1, ordnance: .9},
+    Submarine: {fire: .6, fuel: .5, armour: 1, sparks: .7, ordnance: .6, steam: true},
+    none: {fire: 1, fuel: 1, armour: 1, sparks: 1, ordnance: 1},
+};
+
+function randomDir(upBias = 0) {
+    const v = new THREE.Vector3();
+    do v.set(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1); while (v.lengthSq() > 1 || v.lengthSq() < .01);
+    v.normalize();
+    if (upBias > 0) v.y = Math.abs(v.y) * (1 - upBias) + upBias;
+    else if (upBias === 0) {} // any direction
+    return v.normalize();
+}
+
+// Chunks of hull and superstructure thrown by an explosion; each trails smoke and splashes down.
+class Debris {
+    constructor(scene, effects) {
+        this.effects = effects;
+        const geometry = new THREE.IcosahedronGeometry(1, 0);
+        const positions = geometry.attributes.position;
+        for (let i = 0; i < positions.count; i++) positions.setXYZ(i, positions.getX(i) * (.6 + Math.random() * .8), positions.getY(i) * (.3 + Math.random() * .5), positions.getZ(i) * (.6 + Math.random() * .9));
+        geometry.computeVertexNormals();
+        this.mesh = new THREE.InstancedMesh(geometry, new THREE.MeshStandardMaterial({color: 0x1d1e20, roughness: .75, metalness: .4}), 220);
+        this.mesh.castShadow = true;
+        this.mesh.frustumCulled = false;
+        this.mesh.count = 0;
+        scene.add(this.mesh);
+        this.items = [];
+        this.matrix = new THREE.Matrix4();
+        this.quaternion = new THREE.Quaternion();
+        this.euler = new THREE.Euler();
+    }
+
+    // Some of the wreckage is burning (fuel-soaked, or hot enough to glow): it streaks flame as it flies.
+    burst(at, count, scale, burning = 0) {
+        for (let i = 0; i < count && this.items.length < 220; i++) {
+            const dir = randomDir(.35);
+            const speed = (1 + Math.random() * 2.2) * Math.sqrt(scale);
+            this.items.push({
+                p: new THREE.Vector3(at.x, at.y + .05, at.z), v: dir.multiplyScalar(speed).add(new THREE.Vector3(0, 1.2, 0)),
+                r: new THREE.Vector3(Math.random() * 6, Math.random() * 6, Math.random() * 6), w: new THREE.Vector3((Math.random() - .5) * 14, (Math.random() - .5) * 14, (Math.random() - .5) * 14),
+                s: (.012 + Math.random() * .03) * Math.sqrt(scale), smoke: Math.random() < .6, fire: i < burning,
+            });
+        }
+    }
+
+    clear() {
+        this.items = [];
+        this.mesh.count = 0;
+    }
+
+    update(dt) {
+        const fx = this.effects;
+        this.items = this.items.filter(item => {
+            item.v.y -= 4.6 * dt;
+            item.v.multiplyScalar(Math.exp(-.25 * dt));
+            item.p.addScaledVector(item.v, dt);
+            item.r.addScaledVector(item.w, dt);
+            if (item.fire) {
+                // A continuous streak of flame and smoke behind it, laid down along the whole of this frame's path.
+                const from = item.last || item.p;
+                const length = from.distanceTo(item.p), n = Math.min(10, Math.ceil(length / .012));
+                for (let k = 0; k < n; k++) {
+                    const f = (k + Math.random()) / n;
+                    const x = from.x + (item.p.x - from.x) * f, y = from.y + (item.p.y - from.y) * f, z = from.z + (item.p.z - from.z) * f;
+                    fx.spawn({x, y, z, vx: item.v.x * .08, vy: item.v.y * .08, vz: item.v.z * .08, ramp: RAMP.BLAZE, frame: FRAME.FLAME, size: .03 + Math.random() * .02, life: .2 + Math.random() * .14, drag: 2, lift: 1, cool: .3, intensity: .9});
+                    if (Math.random() < .45) fx.spawn({x, y, z, ramp: RAMP.SMOKE_DARK, frame: FRAME.SMOKE, size: .04, life: 2.2 + Math.random(), drag: 1, lift: .2, cool: 1.5, wind: .6, turb: .3, alpha: .7});
+                }
+                item.last = (item.last || item.p.clone()).copy(item.p);
+            } else if (item.smoke && Math.random() < .7) fx.spawn({x: item.p.x, y: item.p.y, z: item.p.z, ramp: RAMP.SMOKE_DARK, frame: FRAME.WISP, size: .04, life: 1.1, drag: 1, wind: .4, alpha: .7});
+            if (item.p.y < 0) {
+                for (let i = 0; i < 8; i++) fx.spawn({x: item.p.x, y: .01, z: item.p.z, vx: (Math.random() - .5) * .4, vy: .8 + Math.random() * .8, vz: (Math.random() - .5) * .4, ramp: RAMP.SPRAY, frame: FRAME.SPRAY, size: .04 + Math.random() * .04, life: .5 + Math.random() * .3, drag: .5, lift: -5, collide: true});
+                fx.ocean.addImpact(item.p.x, item.p.z, .18);
+                return false;
+            }
+            return true;
+        });
+        this.items.forEach((item, i) => {
+            this.quaternion.setFromEuler(this.euler.set(item.r.x, item.r.y, item.r.z));
+            this.matrix.compose(item.p, this.quaternion, new THREE.Vector3(item.s, item.s, item.s));
+            this.mesh.setMatrixAt(i, this.matrix);
+        });
+        this.mesh.count = this.items.length;
+        this.mesh.instanceMatrix.needsUpdate = true;
+    }
+}
+
+// Expanding rings: a flat foam-white ring on the water and a faint spherical blast front in the air.
+class Shockwaves {
+    constructor(scene) {
+        this.pool = [];
+        const ringMaterial = () => new THREE.ShaderMaterial({
+            uniforms: {uProgress: {value: 0}, uStrength: {value: 1}, uAir: {value: 0}},
+            vertexShader: /* glsl */`varying vec2 vUv; varying vec3 vNormalV; varying vec3 vView;
+                void main() { vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.); vView = -mv.xyz; vNormalV = normalMatrix * normal; gl_Position = projectionMatrix * mv; }`,
+            fragmentShader: /* glsl */`uniform float uProgress; uniform float uStrength; uniform float uAir; varying vec2 vUv; varying vec3 vNormalV; varying vec3 vView;
+                void main() {
+                    float a;
+                    if (uAir > .5) {
+                        float rim = 1. - abs(dot(normalize(vNormalV), normalize(vView)));
+                        a = pow(rim, 3.) * (1. - uProgress) * .55;
+                    } else {
+                        float r = length(vUv - .5) * 2.;
+                        a = exp(-pow((r - .82) / (.07 + uProgress * .1), 2.)) * (1. - uProgress) * (1. - uProgress);
+                    }
+                    gl_FragColor = vec4(vec3(1., .96, .9) * a * uStrength, 0.);
+                }`,
+            transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+        });
+        for (let i = 0; i < 10; i++) {
+            const water = i < 7;
+            const mesh = new THREE.Mesh(water ? new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2) : new THREE.SphereGeometry(.5, 24, 16), ringMaterial());
+            mesh.material.uniforms.uAir.value = water ? 0 : 1;
+            mesh.visible = false;
+            mesh.renderOrder = 9;
+            mesh.layers.set(NO_REFLECTION_LAYER);
+            scene.add(mesh);
+            this.pool.push({mesh, water, t: 1, duration: 1, size: 1});
+        }
+    }
+
+    ring(at, scale, kind) {
+        const item = this.pool.filter(p => p.water === (kind === 'water')).sort((a, b) => b.t / b.duration - a.t / a.duration)[0];
+        if (!item) return;
+        item.t = 0;
+        item.duration = kind === 'water' ? 1.1 + scale * .4 : .45;
+        item.size = (kind === 'water' ? 2.4 : 1.8) * scale;
+        item.mesh.position.set(at.x, kind === 'water' ? .02 : at.y, at.z);
+        item.mesh.material.uniforms.uStrength.value = kind === 'water' ? .22 : .22;
+        item.mesh.visible = true;
+    }
+
+    update(dt) {
+        for (const item of this.pool) {
+            if (item.t >= item.duration) {
+                item.mesh.visible = false;
+                continue;
+            }
+            item.t += dt;
+            const k = Math.min(1, item.t / item.duration);
+            const scale = item.size * (1 - Math.pow(1 - k, 2.4));
+            item.mesh.scale.setScalar(Math.max(.001, scale));
+            item.mesh.material.uniforms.uProgress.value = k;
+        }
+    }
+}
+
+// Wreckage left floating where a ship went down.
+class Flotsam {
+    constructor(scene, ocean) {
+        this.ocean = ocean;
+        this.mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, .12, .26), new THREE.MeshStandardMaterial({color: 0x2e2a25, roughness: .92}), 260);
+        this.mesh.frustumCulled = false;
+        this.mesh.count = 0;
+        this.mesh.castShadow = false;
+        scene.add(this.mesh);
+        this.items = [];
+        this.matrix = new THREE.Matrix4();
+        this.q = new THREE.Quaternion();
+        this.e = new THREE.Euler();
+    }
+
+    scatter(center, radius, count) {
+        for (let i = 0; i < count && this.items.length < 260; i++) {
+            const a = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * radius;
+            this.items.push({x: center.x + Math.cos(a) * d * 1.4, z: center.z + Math.sin(a) * d * .7, yaw: Math.random() * 6, size: .02 + Math.random() * .045, drift: new THREE.Vector2((Math.random() - .5) * .03, (Math.random() - .5) * .03), seed: Math.random() * 10});
+        }
+    }
+
+    clear() {
+        this.items = [];
+        this.mesh.count = 0;
+    }
+
+    update(dt, time) {
+        this.items.forEach((item, i) => {
+            item.x += item.drift.x * dt;
+            item.z += item.drift.y * dt;
+            const y = this.ocean.height(item.x, item.z, time) - item.size * .05;
+            this.q.setFromEuler(this.e.set(Math.sin(time + item.seed) * .2, item.yaw, Math.cos(time * .8 + item.seed) * .2));
+            this.matrix.compose(new THREE.Vector3(item.x, y, item.z), this.q, new THREE.Vector3(item.size, item.size, item.size));
+            this.mesh.setMatrixAt(i, this.matrix);
+        });
+        this.mesh.count = this.items.length;
+        this.mesh.instanceMatrix.needsUpdate = true;
+    }
+}

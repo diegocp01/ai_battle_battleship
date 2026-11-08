@@ -1,224 +1,130 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Battleship: GPT vs Claude</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0d1420">
+    <meta name="description" content="Two AI admirals deploy their fleets and trade fire on a hyperreal 3D ocean.">
+    <title>AI Battleship</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%232f6fe0'/%3E%3Cstop offset='1' stop-color='%23123a8f'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='url(%23g)'/%3E%3Cpath d='M10 38h44l-6 9H17z' fill='%23e8edf5'/%3E%3Cpath d='M22 38v-7h14v-6h6v13' fill='%23e8edf5'/%3E%3Cpath d='M36 25l12-4' stroke='%23e8edf5' stroke-width='2.4' stroke-linecap='round'/%3E%3Cpath d='M8 52c6 0 6-3 12-3s6 3 12 3 6-3 12-3 6 3 12 3' stroke='%23ff8552' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
     <link rel="stylesheet" href="/static/css/style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script type="importmap">{"imports": {"three": "/static/vendor/three/three.module.js", "three/addons/": "/static/vendor/three/addons/"}}</script>
+    <script type="module" src="/static/js/game.js"></script>
 </head>
+<body class="is-menu">
+    <a class="skip-link" href="#setup">Skip to setup</a>
 
-<body>
-    <!-- Modal for selecting number of games and models -->
-    <div id="modal-overlay" class="modal-overlay">
-        <div class="modal">
-            <div class="modal-glow"></div>
-            <h2>⚓ AI Battleship Arena</h2>
-            <p>GPT vs Claude</p>
-
-            <label for="game-count">How many battles to run?</label>
-            <select id="game-count">
-                <option value="1">1 Battle</option>
-                <option value="2">2 Battles</option>
-                <option value="3" selected>3 Battles</option>
-                <option value="4">4 Battles</option>
-                <option value="5">5 Battles</option>
-            </select>
-
-            <label for="gpt-model">Side A (GPT) Model</label>
-            <select id="gpt-model">
-                <option value="gpt-5.1" selected>GPT 5.1 Medium</option>
-                <option value="gpt-5.2">GPT 5.2 Medium</option>
-            </select>
-
-            <label for="claude-model">Side B (Claude) Model</label>
-            <select id="claude-model">
-                <option value="claude-haiku-4.5" selected>Claude Haiku 4.5 Thinking</option>
-                <option value="claude-sonnet-4.5">Claude Sonnet 4.5 Thinking</option>
-            </select>
-
-            <button id="btn-run" class="btn-run">Launch Battle</button>
-        </div>
+    <!-- The whole window is the 3D battle; everything else floats over it. -->
+    <div id="theater" class="theater" data-camera="cinematic">
+        <div class="theater-loading" aria-hidden="true"><span class="loading-wave"></span><span>Raising the fleet…</span></div>
+        <p class="theater-fallback">The 3D battle needs hardware-accelerated WebGL. The scoreboard and commentary still follow every shot.</p>
     </div>
 
-    <!-- Main game area -->
-    <div id="game-container" class="game-container hidden">
-        <div class="game-header">
-            <h1>Battle <span id="game-number">1</span> of <span id="total-games">3</span></h1>
-            <div id="phase-indicator" class="phase-indicator">Ship Placement Phase</div>
+    <div id="hud" class="hud">
+        <div id="error-message" class="error-banner glass hidden" role="alert"></div>
+
+        <div class="view-controls glass match-only" role="toolbar" aria-label="Camera">
+            <div class="segmented" role="radiogroup" aria-label="Camera">
+                <button type="button" class="seg" data-camera="cinematic" role="radio" aria-checked="true" title="Cinematic camera (1)">Cinematic</button>
+                <button type="button" class="seg" data-camera="tactical" role="radio" aria-checked="false" title="Tactical view (2)">Tactical</button>
+                <button type="button" class="seg" data-camera="free" role="radio" aria-checked="false" title="Free camera: drag to orbit, right-drag to pan, scroll to zoom (3)">Free</button>
+            </div>
+            <button type="button" id="btn-speed" class="hud-button speed-button" title="Playback speed">1×</button>
+        </div>
+        <p id="camera-hint" class="camera-hint glass match-only" role="status">Free camera · drag to orbit, right-drag to pan, scroll to zoom · press <kbd>1</kbd> to follow the action</p>
+        <div class="hud-controls glass" role="toolbar" aria-label="View controls">
+            <button type="button" id="btn-hud" class="hud-button icon-button match-only" aria-pressed="false" title="Hide the overlay (H)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2 10s3-5.5 8-5.5S18 10 18 10s-3 5.5-8 5.5S2 10 2 10z"/><circle cx="10" cy="10" r="2.4"/></svg><span class="visually-hidden">Hide overlay</span></button>
+            <button type="button" id="btn-sound" class="hud-button icon-button" aria-pressed="true" title="Sound (M)"><svg viewBox="0 0 20 20" aria-hidden="true"><path class="speaker" d="M3 7.5h3l4-3.5v12l-4-3.5H3z"/><path class="waves" d="M13 7.2a4 4 0 0 1 0 5.6M15.2 5a7 7 0 0 1 0 10"/><path class="mute" d="M13 7.5l5 5m0-5l-5 5"/></svg><span class="visually-hidden">Sound</span></button>
+            <button type="button" id="btn-fullscreen" class="hud-button icon-button" title="Full screen (F)"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8V3h5M12 3h5v5M17 12v5h-5M8 17H3v-5"/></svg><span class="visually-hidden">Full screen</span></button>
         </div>
 
-        <div class="game-area">
-            <!-- GPT Panel (Left) -->
-            <div class="model-panel gpt-panel">
-                <div class="model-header">
-                    <img src="/static/img/openai.webp" alt="OpenAI" class="model-icon">
-                    <h2 id="gpt-model-name">GPT 5.1 Medium</h2>
-                </div>
-                <div id="gpt-thinking" class="thinking-bubble hidden">
-                    <span class="dot"></span>
-                    <span class="dot"></span>
-                    <span class="dot"></span>
-                    <span>Thinking...</span>
-                    <span id="gpt-timer" class="timer">0.0s</span>
-                </div>
-                <div class="timing-info">
-                    <div class="time-stat">
-                        <span class="time-label">Last move:</span>
-                        <span id="gpt-last-time" class="time-value">0.0s</span>
+        <div id="theater-banner" class="theater-banner" aria-hidden="true"><span class="banner-kicker"></span><span class="banner-title"></span></div>
+
+        <!-- Main menu -->
+        <section id="setup" class="menu" aria-labelledby="setup-title">
+            <form id="setup-form" class="menu-card glass">
+                <div class="setup-title-row">
+                    <div class="setup-heading">
+                        <span class="app-icon" aria-hidden="true">
+                            <svg viewBox="0 0 64 64"><path class="icon-hull" d="M9 37h46l-6.5 9.5h-33z"/><path class="icon-deck" d="M21 37v-6.5h14V25h6.5v12"/><path class="icon-mast" d="M38 25l11-4"/><path class="icon-sea" d="M7 52c6 0 6-3.2 12.5-3.2S25.5 52 32 52s6-3.2 12.5-3.2S50.5 52 57 52"/><circle class="icon-blast" cx="50" cy="16" r="4.2"/></svg>
+                        </span>
+                        <div><p class="setup-eyebrow">AI Battleship</p><h1 id="setup-title" tabindex="-1">New match</h1></div>
                     </div>
-                    <div class="time-stat">
-                        <span class="time-label">Total time:</span>
-                        <span id="gpt-total-time" class="time-value">0.0s</span>
-                    </div>
+                    <span id="test-badge" class="test-badge hidden">Test · no LLM calls</span>
                 </div>
-                <div class="stats-box">
-                    <div class="stat">
-                        <span class="stat-value" id="gpt-wins">0</span>
-                        <span class="stat-label">Wins</span>
-                    </div>
-                    <div class="stat">
-                        <span class="stat-value" id="gpt-losses">0</span>
-                        <span class="stat-label">Losses</span>
-                    </div>
+                <div class="setup-connection"><label for="play-mode">Connection</label><select id="play-mode" aria-describedby="mode-description"><option value="test">Test</option><option value="api">API keys</option></select><p id="mode-description">Simulated moves, no LLM calls</p></div>
+                <div class="player-picks">
+                    <fieldset class="player-pick gpt-pick"><legend>Blue fleet</legend><label for="gpt-model" id="gpt-model-label">Model</label><select id="gpt-model" disabled><option value="">Loading…</option></select><p class="piece-note"><span class="fleet-chip gpt" aria-hidden="true"></span>West grid</p></fieldset>
+                    <span class="versus" aria-hidden="true">vs</span>
+                    <fieldset class="player-pick claude-pick"><legend>Orange fleet</legend><label for="claude-model" id="claude-model-label">Model</label><select id="claude-model" disabled><option value="">Loading…</option></select><p class="piece-note"><span class="fleet-chip claude" aria-hidden="true"></span>East grid</p></fieldset>
                 </div>
-                <div class="ships-remaining">
-                    <h4>Ships Remaining</h4>
-                    <div id="gpt-ships" class="ship-list">
-                        <span class="ship-tag" data-ship="Carrier">Carrier</span>
-                        <span class="ship-tag" data-ship="Battleship">Battleship</span>
-                        <span class="ship-tag" data-ship="Cruiser">Cruiser</span>
-                        <span class="ship-tag" data-ship="Submarine">Submarine</span>
-                        <span class="ship-tag" data-ship="Destroyer">Destroyer</span>
-                    </div>
+                <button id="btn-run" class="button primary start-button" type="submit" disabled><svg aria-hidden="true" viewBox="0 0 16 16"><path d="M5 3.5 12 8l-7 4.5z" fill="currentColor"/></svg><span>Start battle</span></button>
+            </form>
+            <section class="universal-stats glass" aria-labelledby="universal-title">
+                <div class="universal-heading"><h2 id="universal-title">Universal stats</h2><button type="button" class="link-button" data-open-history>History</button></div>
+                <div class="universal-tally">
+                    <div class="universal-side"><span class="pip" data-result="gpt"></span><span><b data-match-total="gpt">0</b><small>GPT wins</small></span></div>
+                    <div class="universal-draws"><b id="universal-games">0</b><small>Battles</small></div>
+                    <div class="universal-side claude-total"><span><b data-match-total="claude">0</b><small>Claude wins</small></span><span class="pip" data-result="claude"></span></div>
                 </div>
-                <div class="last-move-box">
-                    <span class="last-move-label">Last Shot:</span>
-                    <span id="gpt-last-move" class="last-move-value">—</span>
+                <ol id="universal-matches" class="universal-matches hidden" aria-label="Every saved battle, newest first"></ol>
+            </section>
+        </section>
+
+        <!-- Match overlay -->
+        <section id="match-view" class="match-hud hidden" aria-label="AI battle">
+            {% macro score_side(model, name) %}
+            <div class="score-side {{ model }}-side">
+                <span class="avatar"><svg class="crown" viewBox="-1 -1 34 26" aria-hidden="true"><defs><linearGradient id="{{ model }}-crown-gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe680"/><stop offset=".55" stop-color="#f5b82e"/><stop offset="1" stop-color="#c98a0c"/></linearGradient></defs><g fill="url(#{{ model }}-crown-gold)" stroke="#a8730a" stroke-width="1" stroke-linejoin="round"><path d="M3.5 19 2 7.5l7.5 5.5L16 3.5l6.5 9.5L30 7.5 28.5 19Z"/><rect x="3" y="18.5" width="26" height="4.5" rx="1.5"/><circle cx="2" cy="6.5" r="1.9"/><circle cx="16" cy="2.6" r="2.1"/><circle cx="30" cy="6.5" r="1.9"/></g><circle cx="16" cy="20.75" r="1.5" fill="#d61f29"/><circle cx="9" cy="20.75" r="1.2" fill="#0071e3"/><circle cx="23" cy="20.75" r="1.2" fill="#0071e3"/></svg><img class="mascot" src="/static/img/mascot-{{ 'codex' if model == 'gpt' else 'claude' }}.png" alt=""><span class="mark fleet-chip {{ model }}" aria-hidden="true"></span></span>
+                <div class="player-copy"><h2 id="{{ model }}-name">{{ name }}</h2>
+                    <div class="fleet-pips" id="{{ model }}-pips" role="img" aria-label="5 of 5 ships afloat">{% for ship, size in ships.items() %}<i data-ship="{{ ship }}" style="--len: {{ size }}"></i>{% endfor %}</div>
+                    <div class="player-activity"><span id="{{ model }}-idle">Waiting to begin</span><span id="{{ model }}-thinking" class="thinking-bubble hidden"><span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span><span id="{{ model }}-thinking-label">Thinking</span><span id="{{ model }}-timer" class="timer">0.0s</span></span></div>
                 </div>
-                <div class="reasoning-box">
-                    <h3>💭 Reasoning</h3>
-                    <div id="gpt-reasoning" class="reasoning-text">Waiting for move...</div>
-                </div>
+                <span class="score-big" id="{{ model }}-score" title="Enemy ships sunk">0</span>
+            </div>
+            {% endmacro %}
+            <div class="scoreboard glass" role="group" aria-label="Contenders">
+                {{ score_side('gpt', 'GPT') }}
+                <span class="score-center"><span class="vs">vs</span><small id="turn-counter">Deploying</small><span class="phase-line"><span class="live-dot" aria-hidden="true"></span><span id="phase-text">Fleet deployment</span></span></span>
+                {{ score_side('claude', 'Claude') }}
             </div>
 
-            <!-- Boards Container (Center) -->
-            <div class="boards-container">
-                <!-- GPT's Board (where Claude attacks) -->
-                <div class="board-section">
-                    <h3 class="board-title gpt-title">GPT's Fleet</h3>
-                    <div class="board-wrapper">
-                        <div class="board-labels-top">
-                            <span>A</span><span>B</span><span>C</span><span>D</span><span>E</span>
-                            <span>F</span><span>G</span><span>H</span><span>I</span><span>J</span>
-                        </div>
-                        <div class="board-with-rows">
-                            <div class="board-labels-left">
-                                <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
-                                <span>6</span><span>7</span><span>8</span><span>9</span><span>10</span>
-                            </div>
-                            <div id="gpt-board" class="board gpt-board"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Claude's Board (where GPT attacks) -->
-                <div class="board-section">
-                    <h3 class="board-title claude-title">Claude's Fleet</h3>
-                    <div class="board-wrapper">
-                        <div class="board-labels-top">
-                            <span>A</span><span>B</span><span>C</span><span>D</span><span>E</span>
-                            <span>F</span><span>G</span><span>H</span><span>I</span><span>J</span>
-                        </div>
-                        <div class="board-with-rows">
-                            <div class="board-labels-left">
-                                <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
-                                <span>6</span><span>7</span><span>8</span><span>9</span><span>10</span>
-                            </div>
-                            <div id="claude-board" class="board claude-board"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <div id="game-status" class="game-status"></div>
+            {# One-line ship silhouettes for the fleet legend, drawn as a single stroke each. #}
+            {% set icons = {
+                'Carrier': (45, 'M1 6.5H44M3 6.5 6 10.5H38L42 6.5M28 6.5V3H32.5L33.5 6.5'),
+                'Battleship': (36, 'M1.5 7H34.5M2 7 4.5 10.5H31L34.5 7M14 7V4.5H17.5V2H19V4.5H22.5V7M6.5 7V5.5H10.5V7M25.5 7V5.5H29.5V7'),
+                'Cruiser': (27, 'M1.5 7H25.5M2 7 4 10.5H23L25.5 7M9 7V4.5H11.5V2H12.5V4.5H15.5V7M18 7V5.5H20.5V7'),
+                'Submarine': (27, 'M2.5 8.5C2.5 7 4.5 6.2 7.5 6.2H21.5C24 6.2 25.5 7.2 25.5 8.5S24 10.8 21.5 10.8H7.5C4.5 10.8 2.5 10 2.5 8.5ZM9.5 6.2V3.2H13.5L14.5 6.2'),
+                'Destroyer': (18, 'M1.5 7H16.5M2 7 3.5 10.5H14.5L16.5 7M6 7V4.5H8.5V2H9.5V4.5H12V7'),
+            } %}
+            {% macro board_tag(model, name) %}
+            <div class="board-tag {{ model }}-tag" id="{{ model }}-panel" role="group" aria-label="{{ name }} fleet">
+                <ul class="fleet-icons" id="{{ model }}-fleet" aria-label="Ships afloat">{% for ship, size in ships.items() %}<li data-ship="{{ ship }}" role="img" aria-label="{{ ship }}: afloat"><svg viewBox="0 0 {{ icons[ship][0] }} 12" width="{{ icons[ship][0] }}" height="12" aria-hidden="true"><path d="{{ icons[ship][1] }}"/></svg></li>{% endfor %}</ul>
+                <p id="{{ model }}-reasoning" class="tag-reasoning">No moves yet.</p>
             </div>
+            {% endmacro %}
+            {{ board_tag('gpt', 'Blue') }}
+            {{ board_tag('claude', 'Orange') }}
 
-            <!-- Claude Panel (Right) -->
-            <div class="model-panel claude-panel">
-                <div class="model-header">
-                    <img src="/static/img/anthropic.jpeg" alt="Anthropic" class="model-icon">
-                    <h2 id="claude-model-name">Claude Haiku 4.5 Thinking</h2>
+            <div class="match-center">
+                <div class="commentary glass">
+                    <div id="game-status" role="status" aria-live="polite">Starting match…</div>
+                    <p id="status-detail"></p>
                 </div>
-                <div id="claude-thinking" class="thinking-bubble hidden">
-                    <span class="dot"></span>
-                    <span class="dot"></span>
-                    <span class="dot"></span>
-                    <span>Thinking...</span>
-                    <span id="claude-timer" class="timer">0.0s</span>
-                </div>
-                <div class="timing-info">
-                    <div class="time-stat">
-                        <span class="time-label">Last move:</span>
-                        <span id="claude-last-time" class="time-value">0.0s</span>
-                    </div>
-                    <div class="time-stat">
-                        <span class="time-label">Total time:</span>
-                        <span id="claude-total-time" class="time-value">0.0s</span>
-                    </div>
-                </div>
-                <div class="stats-box">
-                    <div class="stat">
-                        <span class="stat-value" id="claude-wins">0</span>
-                        <span class="stat-label">Wins</span>
-                    </div>
-                    <div class="stat">
-                        <span class="stat-value" id="claude-losses">0</span>
-                        <span class="stat-label">Losses</span>
-                    </div>
-                </div>
-                <div class="ships-remaining">
-                    <h4>Ships Remaining</h4>
-                    <div id="claude-ships" class="ship-list">
-                        <span class="ship-tag" data-ship="Carrier">Carrier</span>
-                        <span class="ship-tag" data-ship="Battleship">Battleship</span>
-                        <span class="ship-tag" data-ship="Cruiser">Cruiser</span>
-                        <span class="ship-tag" data-ship="Submarine">Submarine</span>
-                        <span class="ship-tag" data-ship="Destroyer">Destroyer</span>
-                    </div>
-                </div>
-                <div class="last-move-box">
-                    <span class="last-move-label">Last Shot:</span>
-                    <span id="claude-last-move" class="last-move-value">—</span>
-                </div>
-                <div class="reasoning-box">
-                    <h3>💭 Reasoning</h3>
-                    <div id="claude-reasoning" class="reasoning-text">Waiting for move...</div>
+                <div class="match-controls glass">
+                    <span class="series-details"><span id="session-indicator" class="status-dot"></span><span id="session-title">Ready</span></span>
+                    <button id="btn-pause" class="button secondary hidden" type="button">Pause</button>
+                    <button id="btn-resume" class="button primary hidden" type="button">Resume</button>
+                    <button id="btn-new" class="button secondary" type="button">New match</button>
+                    <button class="button secondary" type="button" data-open-history>History</button>
                 </div>
             </div>
-        </div>
+        </section>
     </div>
 
-    <!-- Stats Table Section -->
-    <div id="stats-section" class="stats-section hidden">
-        <h2>📊 Battle History</h2>
-        <table id="stats-table" class="stats-table">
-            <thead>
-                <tr>
-                    <th>Battle #</th>
-                    <th>Time</th>
-                    <th>Winner</th>
-                    <th>Turns</th>
-                    <th>GPT Time (s)</th>
-                    <th>Claude Time (s)</th>
-                </tr>
-            </thead>
-            <tbody id="stats-body">
-            </tbody>
-        </table>
-    </div>
-
-    <script src="/static/js/game.js"></script>
+    <dialog id="history-dialog" class="history-dialog glass" aria-labelledby="history-title">
+        <div class="dialog-heading"><h2 id="history-title">Match history</h2><span id="history-count" class="count-badge">0 battles</span><span id="overall-score" class="overall-score" aria-label="All-time battles: GPT won 0, Claude won 0"><span class="tally" title="GPT wins"><span class="pip" data-result="gpt"></span><b data-match-total="gpt">0</b></span><span class="tally" title="Claude wins"><b data-match-total="claude">0</b><span class="pip" data-result="claude"></span></span></span><button type="button" class="hud-button icon-button close-dialog" aria-label="Close"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15"/></svg></button></div>
+        <div class="history-card"><p id="history-empty" class="history-empty">No battles yet. Games played with API keys are saved here.</p><div id="history-table-wrap" class="table-wrap hidden" tabindex="0" role="region" aria-label="All match history"><table class="stats-table"><thead><tr><th scope="col">Finished</th><th scope="col">Models</th><th scope="col">Result</th><th scope="col">Shots</th><th scope="col">Accuracy</th><th scope="col">Thinking time</th></tr></thead><tbody id="stats-body"></tbody></table></div></div>
+    </dialog>
 </body>
-
 </html>
