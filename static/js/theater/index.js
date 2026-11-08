@@ -533,6 +533,8 @@ export class Theater {
         let longest = 0;
         fleetData.forEach((data, index) => {
             const ship = new Ship(data.name, TEAMS[team], this.shared, this.shipTextures);
+            // The aircraft that go over a carrier's side splash into the sea.
+            if (ship.cargo) ship.cargo.fx = this.effects;
             ship.cells = [...data.cells];
             const centers = data.cells.map(c => this.grid.cellCenter(team, c));
             const center = centers.reduce((sum, c) => sum.add(c), new THREE.Vector3()).divideScalar(centers.length);

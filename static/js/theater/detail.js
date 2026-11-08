@@ -336,10 +336,9 @@ export function seahawk(s = 1) {
     return {gray: [body, boom, fin, ...blades]};
 }
 
-// A yellow deck tractor.
-export function tug(b, x, y, z, yaw = 0) {
-    b.add('yellow', place(box(.03, .012, .018), [0, 0, 0], [0, yaw, 0]), [x, y + .006, z]);
-    b.add('dark', place(box(.008, .008, .014), [0, 0, 0], [0, yaw, 0]), [x - Math.cos(yaw) * .006, y + .016, z + Math.sin(yaw) * .006]);
+// A yellow deck tractor, by material, standing on its wheels at the origin and facing +x.
+export function tugParts() {
+    return {yellow: [place(box(.03, .012, .018), [0, .006, 0])], dark: [place(box(.008, .008, .014), [-.006, .016, 0])]};
 }
 
 // A sailor, 1.8 m tall: a body in the colour of the job and a helmet or head.

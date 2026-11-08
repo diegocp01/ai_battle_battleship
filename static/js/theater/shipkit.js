@@ -323,7 +323,11 @@ function weathering(material, shared, ship, {hull = false, rust = .5, ember = tr
         shader.vertexShader = shader.vertexShader
             .replace('#include <common>', '#include <common>\nuniform mat4 uShipInv;\nvarying vec3 vShipPos;\nvarying vec3 vShipNormal;')
             .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
-                mat4 toShip = uShipInv * modelMatrix;
+                #ifdef USE_INSTANCING
+                    mat4 toShip = uShipInv * modelMatrix * instanceMatrix;
+                #else
+                    mat4 toShip = uShipInv * modelMatrix;
+                #endif
                 vShipPos = (toShip * vec4(transformed, 1.)).xyz;
                 vShipNormal = normalize(mat3(toShip) * objectNormal);`);
         shader.fragmentShader = shader.fragmentShader
