@@ -422,6 +422,8 @@ export class Effects {
         const fuel = blast.fuel * hull.fuel;
         const carry = physics.drift;
         const wet = water || waterline || hull.steam;
+        // The recording begins with hull contact, before any delayed-fuze visual burst.
+        if (sound) this.onSound('explosion', at, Math.max(.25, size), {weapon: kind, ship, waterline: wet, mass: round?.mass});
         for (let i = 0; i < Math.round(20 + 30 * size * hull.sparks); i++) {
             const dir = randomDir(.12), speed = (.8 + r() * 2.8) * Math.sqrt(size);
             this.spawn({x, y: y + .015, z, vx: dir.x * speed + carry.x, vy: dir.y * speed + .35, vz: dir.z * speed + carry.z, ramp: RAMP.SPARK, frame: FRAME.SPARK, size: .008 + r() * .012, life: .18 + r() * .55, drag: 1.1, lift: -DEBRIS_GRAVITY, stretch: .025, collide: true, intensity: .8});
@@ -479,12 +481,11 @@ export class Effects {
             }
             if (hull.steam) this.steam(at, size);
             if (debris && size > .45) {
-                this.cookOffs(at, size * hull.ordnance);
+                this.cookOffs(at, size * hull.ordnance, sound);
                 if (fuel > .6 && wet) this.spill(at, size * fuel);
-                if (hull.secondary) this.later(.4 + r() * .4, () => this.pop(at.clone().add(new THREE.Vector3((r() - .5) * .2, .03, (r() - .5) * .2)), .6 * size, true));
+                if (hull.secondary) this.later(.4 + r() * .4, () => this.pop(at.clone().add(new THREE.Vector3((r() - .5) * .2, .03, (r() - .5) * .2)), .6 * size, sound));
             }
             this.onShake(at, .4 * size);
-            if (sound) this.onSound('explosion', at, Math.max(.25, size), {weapon: kind, ship, waterline: wet, mass: round?.mass});
         };
         if (physics.delay) this.later(physics.delay, burst); else burst();
     }
@@ -497,12 +498,12 @@ export class Effects {
     }
 
     // Ammunition and fuel cooking off: small blasts popping around a hit for a second or two afterwards.
-    cookOffs(at, scale = 1) {
+    cookOffs(at, scale = 1, sound = true) {
         const r = Math.random;
         const count = 2 + Math.floor(r() * 3);
         for (let i = 0; i < count; i++) {
             const offset = new THREE.Vector3((r() - .5) * .34, r() * .07, (r() - .5) * .34).multiplyScalar(scale);
-            this.later(.3 + r() * 1.5, () => this.pop(at.clone().add(offset), .3 + r() * .28, i === 0));
+            this.later(.3 + r() * 1.5, () => this.pop(at.clone().add(offset), .3 + r() * .28, sound && i === 0));
         }
     }
 
@@ -525,7 +526,7 @@ export class Effects {
             const dir = randomDir(.6);
             this.spawn({x, y: y + .04, z, vx: dir.x * .2, vy: .3 + r() * .25, vz: dir.z * .2, ramp: RAMP.SMOKE_FIRE, frame: FRAME.SMOKE, size: (.2 + r() * .2) * scale, life: 2.5 + r() * 2, drag: 1.4, lift: .3, wind: 1, swirl: .4, delay: r() * .1});
         }
-        if (sound) this.onSound('explosion', at, scale * .6);
+        if (sound) this.onSound('explosion', at, scale * .6, {secondary: true});
     }
 
     // Burning fuel thrown onto the water beside a hit; it burns out after a few seconds.

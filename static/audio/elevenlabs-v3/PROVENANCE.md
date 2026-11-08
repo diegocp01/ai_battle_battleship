@@ -71,3 +71,29 @@ Exact prompts, also retained in the user's [generation history](https://elevenla
 - **Warning:** Isolated short aircraft cockpit caution alert for a naval flight simulation. Three crisp alternating electronic warning beeps, restrained narrowband avionics tone with a slight cockpit speaker texture. Starts immediately, clearly separated pulses, ends cleanly within two seconds. No spoken words, no siren sweep, no engines, no music, no explosion.
 
 The five dialogue/radio placeholders remain optional and unrecorded. Engine and airflow loops have filtered-noise fallbacks during asset loading or decode failure. Their lifetime is controlled by launch/flight events rather than a fixed timer, and they are capped at four concurrent loops.
+
+## Impact rework: contact, explosion, concrete/rubble
+
+Generated November 8, 2026 with **ElevenLabs Sound Effects v3**, following the requested sequence of a physical hit, explosion, then concrete/debris breaking and falling. Model v3, prompt influence 30%, auto-improvement off, loop off. Six prompts produced four takes each; take 1 was exported for each. Generation used 640 credits (2,160 to 1,520 remaining). No plan or credit purchase was made.
+
+| File | Requested duration | Export source | Processing |
+| --- | ---: | --- | --- |
+| impact-shell-v2.wav | 2 s | `One_small_naval_high_#1-1794116271867.wav` | Uniform peak normalization |
+| impact-ap-v2.wav | 3 s | `One_heavy_armour-pie_#1-1794116366773.wav` | Uniform peak normalization |
+| ship-hit-v2.wav | 3 s | `Single_missile_strik_#1-1794116426731.wav` | Trimmed 28 ms of leading quiet; 2.972 s final |
+| impact-jet-v2.wav | 4 s | `Aircraft_slamming_in_#1-1794116487099.wav` | Uniform peak normalization |
+| impact-secondary.wav | 1.5 s | `One_small_secondary__#1-1794116559462.wav` | Trimmed 265 ms of leading quiet; 1.215 s final |
+| impact-rubble.wav | 2.5 s | `Debris_falling_immed_#1-1794116663069.wav` | Export is 2.48 s; uniform peak normalization |
+
+All six files are stereo 48 kHz PCM WAV, peak-normalized to 0.85. Leading quiet was measured in 1 ms RMS windows against 1.2% of the source peak, retaining 2 ms before onset. The original four impact files remain for comparison, but gameplay now loads the v2 replacements. The torpedo recording is retained.
+
+Exact prompts (also retained in the user's [ElevenLabs history](https://elevenlabs.io/app/sound-effects/history)):
+
+- **Small shell:** One small naval high-explosive shell hitting thick steel hull plate, heard outdoors nearby. Instant hard broadband crack and dense metal punch, very short pressure burst, gritty torn steel and a few fragments falling onto the deck. Dry, abrupt and physical, fast decay. No ringing bell, ricochet whistle, laser, synthetic bass drop, cinematic riser, music or voices.
+- **Heavy shell:** One heavy armour-piercing naval shell punching through thick warship steel. Immediate brutal metallic fracture and a dense short internal detonation, then buckling plate and heavy irregular fragments clattering down. Close outdoor perspective, dry transient with natural weight and quick decay. No long ringing, sci-fi zap, synthetic sub bass, cinematic boom swell, music or voices.
+- **Missile:** Single missile striking a solid ship structure: first an immediate hard collision CRACK, then one forceful explosive pressure blast with dense natural low end and a short rough decay. A physical hit followed by detonation, recorded outdoors at close distance. Dry and punchy, no approaching missile, no tonal ringing, no synthetic bass drop or sci-fi sounds, no music or voices.
+- **Aircraft:** Aircraft slamming into a solid ship: immediate violent crunch of heavy metal, one explosive detonation, then a brief rough fuel ignition rush and breaking airframe fragments. Three clear stages: collision, blast, wreckage. Close outdoor recording texture with real weight, dry fast attack, no approaching engine, no long cinematic rumble, no synthetic bass drop, music or speech.
+- **Secondary:** One small secondary ammunition cook-off inside damaged steel wreckage. Short muted dry pressure pop, a quick rattle of loose fragments, then silence. Compact and much smaller than a missile explosion, outdoor recording texture. No deep booming tail, no repeated blasts, no laser, no ricochet, no music or speech.
+- **Rubble:** Debris falling immediately after a missile explosion: thick concrete cracking and crumbling, several heavy broken chunks hitting a hard surface, then smaller gravel, gritty rubble and dust settling. Irregular physical impacts, crunchy dry close detail, rapidly thinning out. Debris only: no initial explosion, no boom, no metallic bell, no whoosh, no music or voices.
+
+Runtime: contact audio fires before delayed-fuze visual bursts; missile/submarine-missile/aircraft hits schedule the separate rubble layer 180 ms after the primary sound. Impact and rubble recordings bypass the synthetic reverb send. Pitch shifts are restrained, attack fade shortened to 0.8 ms, and level scaling keeps the small hit audible while bounding large-hit gain. Secondary pops use their own low-level sample and stay silent if that optional sample is missing. These are generated effects; the concrete texture is the requested art direction, not a claim that every ship structure is made of concrete.

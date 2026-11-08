@@ -6,11 +6,13 @@ export const SOUND_BANK = Object.freeze({
     subMissile: {file: 'missile-sub.wav', gain: .9},
     cannonHeavy: {file: 'cannon-heavy.wav', gain: .95},
     cannon: {file: 'cannon-light.wav', gain: .8},
-    explosion: {file: 'ship-hit.wav', gain: 1}, // missile warhead / secondary blast
-    impactShell: {file: 'impact-shell.wav', gain: .8},
-    impactAP: {file: 'impact-ap.wav', gain: 1},
-    impactJet: {file: 'impact-jet.wav', gain: 1},
+    explosion: {file: 'ship-hit-v2.wav', gain: .95}, // primary missile warhead
+    impactShell: {file: 'impact-shell-v2.wav', gain: .75},
+    impactAP: {file: 'impact-ap-v2.wav', gain: .9},
+    impactJet: {file: 'impact-jet-v2.wav', gain: .95},
     impactUnderwater: {file: 'impact-underwater.wav', gain: .9},
+    impactRubble: {file: 'impact-rubble.wav', gain: .3},
+    impactSecondary: {file: 'impact-secondary.wav', gain: .32},
     splash: {file: 'ocean-miss.wav', gain: .8},
     creak: {file: 'ship-sinking.wav', gain: .8},
     jet: {file: 'jet.wav', gain: .65, timed: true},
@@ -36,6 +38,7 @@ export const OPEN_CUES = Object.freeze({
 
 export function soundKey(kind, scale, impact = {}) {
     if (kind === 'explosion') {
+        if (impact.secondary) return 'impactSecondary';
         if (impact.weapon === 'torpedo') return 'impactUnderwater';
         if (impact.weapon === 'gun') return 'impactShell';
         if (impact.weapon === 'salvo') return 'impactAP';
@@ -48,9 +51,9 @@ export function soundKey(kind, scale, impact = {}) {
 // Underwater detonation is a distinct event; a waterline shell retains its own attack.
 export function impactVoice({weapon, ship, waterline, mass} = {}) {
     if (!weapon) return {rate: 1, cutoff: 0};
-    const hullRate = {Carrier: .96, Battleship: .92, Cruiser: 1, Destroyer: 1.05, Submarine: .94}[ship] ?? 1;
-    const shellRate = weapon === 'gun' ? (mass != null && mass < 5 ? 1.12 : .9) : 1;
-    return {rate: hullRate * shellRate, cutoff: ship === 'Submarine' || weapon === 'torpedo' ? 1800 : waterline ? 4200 : 0};
+    const hullRate = {Carrier: .99, Battleship: .985, Cruiser: 1, Destroyer: 1.015, Submarine: .995}[ship] ?? 1;
+    const shellRate = weapon === 'gun' ? (mass != null && mass < 5 ? 1.02 : .99) : 1;
+    return {rate: hullRate * shellRate, cutoff: weapon === 'torpedo' ? 1800 : waterline ? 6500 : 0};
 }
 
 export async function loadSoundBank(ctx, onLoaded, fetcher = fetch) {

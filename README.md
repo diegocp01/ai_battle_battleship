@@ -59,7 +59,7 @@ AI Battleship: two AI models deploy their fleets and trade fire on a full-screen
   - a low angle over the water on the far side as it strikes.
   
   There is also a tactical wide view and a free camera. Scroll or pinch to zoom whichever camera is running, and drag at any time to take the camera yourself.
-- **ElevenLabs v3 sound**: local stereo recordings for three distinct missile launches (cruiser, light ship and submarine), heavy and light naval guns, five hull-impact families (small shell, armour-piercing shell, missile, jet crash and underwater torpedo), ocean misses, sinking steel, jets, torpedoes and a looping open sea. Weapon events retain camera-relative distance, pan and arrival delay, with subtle per-shot pitch variation and bounded overlap. Hit audio follows the projectile and target hull: heavy hulls resonate lower, light shells crack higher, and waterline/submarine hits are muffled. Synthesized audio covers loading failures and the remaining whistles, horns and UI cues. No ElevenLabs account or API call is needed during play. [Audio provenance](static/audio/elevenlabs-v3/PROVENANCE.md).
+- **ElevenLabs v3 sound**: local stereo recordings for three distinct missile launches (cruiser, light ship and submarine), heavy and light naval guns, five hull-impact families (small shell, armour-piercing shell, missile, jet crash and underwater torpedo), ocean misses, sinking steel, jets, torpedoes and a looping open sea. Weapon events retain camera-relative distance, pan and arrival delay, with subtle per-shot pitch variation and bounded overlap. Hit audio starts with contact, followed by detonation and falling fragments. Missiles and aircraft add a separate concrete/rubble tail after 180 ms. Small cook-offs have their own quieter recording. Subtle hull/caliber pitch variation preserves the recorded attack; only waterline and underwater events are filtered. Synthesized audio covers loading failures and the remaining whistles, horns and UI cues. No ElevenLabs account or API call is needed during play. [Audio provenance](static/audio/elevenlabs-v3/PROVENANCE.md).
 
 Everything is generated in code with [three.js](https://threejs.org) (vendored in `static/vendor/three`), so there are no model or texture downloads.
 
@@ -139,6 +139,8 @@ Neither API offers a faster tier than Fast. *Default* effort sends no effort, so
 - **Errors:** rate limits, rejected keys and declined moves show as readable errors with a *Retry move* button.
 
 The Test mode model lists are in `MODELS` in `players.py`.
+
+Compare the previous impact recordings with the new in-game mixes at `tests/impact-audio-browser.html`.
 
 ### Carrier cinematic audio
 

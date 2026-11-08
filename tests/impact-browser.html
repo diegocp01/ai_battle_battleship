@@ -6,7 +6,7 @@
 <script type="importmap">{"imports":{"three":"/static/vendor/three/three.module.js","three/addons/":"/static/vendor/three/addons/"}}</script>
 <style>body{margin:0;background:#111;color:white;font:14px system-ui}#theater{position:fixed;inset:0}form{position:fixed;z-index:2;left:20px;top:20px;padding:12px;background:#141c23dd;border-radius:8px}select,button,input{margin:0 8px;padding:6px}output{display:inline-block;min-width:40px}</style>
 <div id="theater"></div>
-<form onsubmit="return false">Impact <select id="kind"><option>missile</option><option>gun</option><option>salvo</option><option>strike</option><option>subMissile</option><option>torpedo</option></select><label><input id="wet" type="checkbox">Waterline</label><button id="play">Replay</button><label>Time <input id="time" type="range" min="0" max="6" step="0.01" value="0.2"></label><output id="age">0.20 s</output></form>
+<form onsubmit="return false">Impact <select id="kind"><option>missile</option><option>gun</option><option>salvo</option><option>strike</option><option>subMissile</option><option>torpedo</option></select><label><input id="wet" type="checkbox">Waterline</label><button id="play">Replay</button><label>Time <input id="time" type="range" min="0" max="6" step="0.01" value="0.2"></label><output id="age">0.20 s</output><button id="verify">Verify audio timing</button><output id="audio-check"></output></form>
 <script type="module">
 import * as THREE from 'three';
 import {createTheater} from '/static/js/theater/index.js';
@@ -55,6 +55,26 @@ document.querySelector('#play').onclick = () => {
     begin(); let last = performance.now();
     const frame = now => {advance(Math.min(.05,(now-last)/1000));last=now;if(elapsed<6)animation=requestAnimationFrame(frame);};
     animation=requestAnimationFrame(frame);
+};
+document.querySelector('#verify').onclick = () => {
+    cancelAnimationFrame(animation);
+    const original = t.effects.onSound, events = [];
+    t.effects.onSound = (...event) => events.push(event);
+    try {
+        for (const weapon of ['gun','salvo','missile','subMissile','strike','torpedo']) {
+            t.effects.clear(); events.length=0;
+            t.effects.explosion(at, 1, {kind:weapon, ship:'Battleship', sound:true});
+            if(events.length!==1 || events[0][3]?.weapon!==weapon) throw Error('Missing immediate contact: '+weapon);
+            for(let i=0;i<180;i++)t.effects.update(1/60,t.camera);
+            if(events.slice(1).some(e=>e[0]==='explosion' && !e[3]?.secondary)) throw Error('Primary blast replayed: '+weapon);
+            t.effects.clear();events.length=0;
+            t.effects.explosion(at,1,{kind:weapon,ship:'Carrier',sound:false});
+            for(let i=0;i<180;i++)t.effects.update(1/60,t.camera);
+            if(events.length)throw Error('Silent impact emitted sound: '+weapon);
+        }
+        document.querySelector('#audio-check').textContent='PASS: six contact cues, distinct secondaries, silent resets';
+    } catch(e) {document.querySelector('#audio-check').textContent='FAIL: '+e.message;}
+    finally {t.effects.onSound=original;seek(.2);}
 };
 window.impactReview = {t, at, seek, kind, wet};
 seek(.2);
