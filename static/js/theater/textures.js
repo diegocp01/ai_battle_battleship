@@ -608,15 +608,58 @@ export function labelTexture(text, {color = '#ffffff', size = 128, font = 600, s
     return canvasTexture(element, {anisotropy: 4});
 }
 
-// A wide word mark used above each fleet: team name in team color over a soft dark glow.
-export function bannerTexture(text, color) {
+// Images for the banners, loaded once each.
+const bannerImages = new Map();
+function bannerImage(url) {
+    if (!bannerImages.has(url)) {
+        bannerImages.set(url, new Promise(resolve => {
+            const image = new Image();
+            image.onload = () => resolve(image);
+            image.onerror = () => resolve(null);
+            image.src = url;
+        }));
+    }
+    return bannerImages.get(url);
+}
+
+// A wide word mark used above each fleet: the model's name in team color over a soft dark glow, with its maker's
+// logo beside it (logo: the URL of a white silhouette on a transparent background, tinted the team color). The
+// name is drawn at once and the logo joins it when its image has loaded.
+export function bannerTexture(text, color, logo = null) {
     const [element, context] = canvas(1024, 192);
-    context.font = '700 96px -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Arial, sans-serif';
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-    context.shadowColor = 'rgba(0,0,0,.6)';
-    context.shadowBlur = 22;
-    context.fillStyle = color;
-    context.fillText(text, 512, 100);
-    return canvasTexture(element, {anisotropy: 4});
+    const texture = canvasTexture(element, {anisotropy: 4});
+    const draw = (image) => {
+        context.clearRect(0, 0, 1024, 192);
+        const mark = image ? 136 : 0, gap = image ? 30 : 0;
+        // Long names shrink to fit beside the logo.
+        let size = 96;
+        context.font = `700 ${size}px -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Arial, sans-serif`;
+        const width = context.measureText(text).width;
+        if (mark + gap + width > 980) {
+            size = Math.max(48, Math.floor(size * (980 - mark - gap) / width));
+            context.font = `700 ${size}px -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Arial, sans-serif`;
+        }
+        const textWidth = context.measureText(text).width;
+        let x = 512 - (mark + gap + textWidth) / 2;
+        context.shadowColor = 'rgba(0,0,0,.6)';
+        context.shadowBlur = 22;
+        if (image) {
+            // The silhouette, tinted the team color.
+            const [tinted, tint] = canvas(mark, mark);
+            tint.drawImage(image, 0, 0, mark, mark);
+            tint.globalCompositeOperation = 'source-in';
+            tint.fillStyle = color;
+            tint.fillRect(0, 0, mark, mark);
+            context.drawImage(tinted, x, 98 - mark / 2);
+            x += mark + gap;
+        }
+        context.textAlign = 'left';
+        context.textBaseline = 'middle';
+        context.fillStyle = color;
+        context.fillText(text, x, 100);
+        texture.needsUpdate = true;
+    };
+    draw(null);
+    if (logo) bannerImage(logo).then(image => { if (image) draw(image); });
+    return texture;
 }
