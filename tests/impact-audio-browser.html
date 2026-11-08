@@ -1,0 +1,25 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Ship impact sound comparison</title><link rel="icon" href="data:,">
+<style>body{background:#101b25;color:#edf3f7;font:16px system-ui;max-width:900px;margin:40px auto;padding:24px}h1{font-size:30px}.flow{padding:18px;background:#1e3443;border-radius:12px;color:#9ee3d0}article{display:flex;align-items:center;gap:12px;border-bottom:1px solid #34434e;padding:18px 0}h2{font-size:17px;flex:1}button{padding:11px 16px;background:#26495c;color:inherit;border:1px solid #628396;border-radius:8px;cursor:pointer}button.new{background:#166a60}p{color:#adbeca;line-height:1.5}pre{white-space:pre-wrap;color:#a7e6b4}</style>
+<h1>Ship impact sounds · ElevenLabs FX v3</h1><p class="flow">HIT → EXPLOSION → CONCRETE / RUBBLE</p><p>The previous recording is provided for comparison. The new mix uses the actual in-game audio path, including the delayed rubble layer on missiles and aircraft.</p>
+<div id="rows"></div><button id="rubble">Rubble layer only</button><button id="secondary">Small secondary burst</button><button id="stop">Stop playback</button><pre id="status">Ready. Select a sound to load the local recordings.</pre>
+<script type="module">
+import {BattleAudio} from '/static/js/theater/audio.js';
+const audio=new BattleAudio(), status=document.querySelector('#status');
+const oldPlayer=new Audio();oldPlayer.volume=.65;
+const rows=[['Small shell','impact-shell.wav',{weapon:'gun',ship:'Destroyer',mass:2.4}],['Armour-piercing shell','impact-ap.wav',{weapon:'salvo',ship:'Battleship'}],['Missile','ship-hit.wav',{weapon:'missile',ship:'Cruiser'}],['Aircraft','impact-jet.wav',{weapon:'strike',ship:'Carrier'}]];
+function stop(){oldPlayer.pause();oldPlayer.currentTime=0;for(const voice of audio.sampleVoices)voice.stop();}
+async function ready(){
+ audio.unlock();await audio.ready;audio.setMuted(false);
+ if(audio.oceanSource)audio.oceanSource.stop();audio.oceanSource=null;
+ if(audio.fallbackAmbienceGain)audio.fallbackAmbienceGain.gain.value=0;
+}
+for(const [label,file,impact] of rows){
+ const row=document.createElement('article'), title=document.createElement('h2');title.textContent=label;row.append(title);
+ const old=document.createElement('button');old.textContent='Previous recording';old.onclick=()=>{stop();oldPlayer.src='/static/audio/elevenlabs-v3/'+file;oldPlayer.play();status.textContent='Previous '+label.toLowerCase()+' recording';};row.append(old);
+ const next=document.createElement('button');next.textContent='New in-game mix';next.className='new';next.onclick=async()=>{try{stop();await ready();audio.play('explosion',null,1,impact);status.textContent='Playing '+label.toLowerCase()+': '+(['missile','strike'].includes(impact.weapon)?'hit + explosion, then concrete/rubble at +180 ms':'hard contact + detonation + falling fragments');}catch(e){status.textContent='FAIL: '+e.message;}};row.append(next);
+ document.querySelector('#rows').append(row);
+}
+document.querySelector('#rubble').onclick=async()=>{stop();await ready();audio.play('impactRubble');status.textContent='Concrete chunks, grit and falling debris — no second explosion';};
+document.querySelector('#secondary').onclick=async()=>{stop();await ready();audio.play('explosion',null,.3,{secondary:true});status.textContent='Small secondary pop — lower level than the primary hit';};
+document.querySelector('#stop').onclick=()=>{stop();status.textContent='Playback stopped';};
+</script></html>

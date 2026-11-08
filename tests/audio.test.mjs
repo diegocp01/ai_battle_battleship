@@ -98,9 +98,9 @@ test('impact recordings follow the projectile, with hull and water coloration', 
     assert.equal(soundKey('explosion', 1), 'explosion');
     assert.ok(impactVoice({weapon:'gun', mass:2.4}).rate > impactVoice({weapon:'gun', mass:31.75}).rate);
     assert.ok(impactVoice({weapon:'missile', ship:'Battleship'}).rate < impactVoice({weapon:'missile', ship:'Destroyer'}).rate);
-    assert.equal(impactVoice({weapon:'missile', waterline:true}).cutoff, 4200);
+    assert.equal(impactVoice({weapon:'missile', waterline:true}).cutoff, 6500);
     assert.equal(impactVoice({weapon:'torpedo'}).cutoff, 1800);
-    assert.equal(impactVoice({weapon:'missile', ship:'Submarine'}).cutoff, 1800);
+    assert.equal(impactVoice({weapon:'missile', ship:'Submarine'}).cutoff, 0);
     assert.deepEqual(impactVoice(), {rate:1, cutoff:0});
 });
 
@@ -112,7 +112,7 @@ test('impact playback selects its sample, filters wet hits, cleans up, and falls
     audio.play('explosion', null, 1, {weapon:'torpedo', ship:'Battleship'});
     const voice = [...audio.sampleVoices][0];
     assert.equal(voice.buffer, underwater);
-    assert.ok(voice.playbackRate.value >= .97 * .92 && voice.playbackRate.value <= 1.03 * .92);
+    assert.ok(voice.playbackRate.value >= .99 * .985 && voice.playbackRate.value <= 1.01 * .985);
     assert.equal(filters[0].type, 'lowpass');
     assert.equal(filters[0].frequency.value, 1800);
     voice.onended();
@@ -165,4 +165,29 @@ test('continuous flight audio survives mute, has a bounded fallback, and stops o
     engine.update(null); // A stale animation callback cannot revive a stopped voice.
     assert.equal(audio.loopVoices.size, 0);
     assert.doesNotThrow(() => new BattleAudio().startLoop('jetEngine', null).stop());
+});
+
+
+test('missile hit precedes dry rubble, while secondary pops never replay the primary blast', () => {
+    const {audio, sources, events} = mockAudio();
+    audio.samples.set('explosion', {duration:3});
+    audio.samples.set('impactRubble', {duration:2.5});
+    audio.samples.set('impactSecondary', {duration:1.5});
+    const sends=[], out=audio.out.bind(audio);
+    audio.out=(at, send)=>{sends.push(send);return out(at, send);};
+    audio.play('explosion', null, 4, {weapon:'missile', ship:'Battleship'});
+    assert.equal(sources.length, 2);
+    assert.equal(sources[0].buffer, audio.samples.get('explosion'));
+    assert.equal(sources[1].buffer, audio.samples.get('impactRubble'));
+    assert.ok(Math.abs(sources[1].started - sources[0].started - .18)<1e-8);
+    assert.deepEqual(sends, [0, 0]);
+    assert.ok(events.some(([kind, level, time])=>kind==='ramp' && level>0 && level<=1.05 && Math.abs(time-10.0008)<1e-8));
+    audio.play('explosion', null, .2, {secondary:true});
+    assert.equal(sources[2].buffer, audio.samples.get('impactSecondary'));
+    assert.equal(sources.length, 3);
+    audio.samples.delete('impactSecondary');
+    audio.play('explosion', null, .2, {secondary:true});
+    assert.equal(sources.length, 3); // Missing optional cook-off stays quiet.
+    for (const source of sources) source.onended();
+    assert.equal(audio.sampleVoices.size, 0);
 });

@@ -110,6 +110,8 @@ export class BattleAudio {
 
     playSample(kind, at, scale, impact = {}) {
         let key = soundKey(kind, scale, impact);
+        // An optional small cook-off must never fall back to another full missile blast.
+        if (impact.secondary && !this.samples.has(key)) return true;
         // Retain the known-good generic hit if a specialized asset has not loaded.
         if (!this.samples.has(key) && kind === 'explosion') key = 'explosion';
         const buffer = this.samples.get(key);
@@ -120,15 +122,21 @@ export class BattleAudio {
         source.buffer = buffer;
         // Preserve each weapon's character while avoiding identical repeated shots.
         const voice = kind === 'explosion' ? impactVoice(impact) : {rate: 1, cutoff: 0};
-        const rate = (.97 + Math.random() * .06) * voice.rate;
+        const isImpact = kind === 'explosion';
+        const rate = (isImpact ? .99 + Math.random() * .02 : .97 + Math.random() * .06) * voice.rate;
         source.playbackRate.value = rate;
         const duration = spec.timed ? Math.max(.1, Math.min(scale, buffer.duration / rate)) : buffer.duration / rate;
-        const output = this.out(at, key === 'creak' ? .16 : .08);
+        // The recordings already contain the outdoor decay. A synthetic room tail smears the hit.
+        const output = this.out(at, isImpact || kind === 'impactRubble' ? 0 : key === 'creak' ? .16 : .08);
+        if (kind === 'impactRubble') output.start += .18;
         const gain = ctx.createGain();
-        const level = spec.gain * (spec.timed ? 1 : Math.min(1.5, Math.max(.15, scale)));
+        // Keep small shells audible without driving large hits into the master compressor.
+        const strength = isImpact ? Math.min(1.05, Math.max(.35, Math.sqrt(Math.max(0, scale)))) : Math.min(1.5, Math.max(.15, scale));
+        const level = spec.gain * (spec.timed ? 1 : strength);
+        const attack = isImpact ? .0008 : .005;
         gain.gain.setValueAtTime(0, output.start);
-        gain.gain.linearRampToValueAtTime(level, output.start + .005);
-        gain.gain.setValueAtTime(level, output.start + Math.max(.005, duration - .08));
+        gain.gain.linearRampToValueAtTime(level, output.start + attack);
+        gain.gain.setValueAtTime(level, output.start + Math.max(attack, duration - .08));
         gain.gain.linearRampToValueAtTime(0, output.start + duration);
         let tone = null;
         if (voice.cutoff) {
@@ -150,6 +158,10 @@ export class BattleAudio {
         };
         source.start(output.start);
         source.stop(output.start + duration);
+        // A separate dry rubble layer follows the missile/aircraft pressure transient.
+        if (isImpact && !impact.secondary && ['missile', 'subMissile', 'strike'].includes(impact.weapon)) {
+            this.playSample('impactRubble', at, Math.min(1, Math.sqrt(Math.max(0, scale))));
+        }
         return true;
     }
 
