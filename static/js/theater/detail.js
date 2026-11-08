@@ -246,11 +246,12 @@ function faceted(stations, s) {
 // a lit leading edge, all-moving tailplanes, twin tails canted outward and twin nozzles, lit wingtips, a badge on
 // each intake's side and the fleet's logo on both faces of both tails. Same frame as hornet(): nose toward +x, the
 // pilot's eye near (.054, .0128).
-//  - 'claude': a white nose cone, white tail tips, white bands along the wing leading edges and the chines; the
-//    glow is orange and the intake badge is the Claude mascot (painted clay orange by its fleet).
+// Both have a trim-colored nose cone and trim bands along the wing leading edges and the chines.
+//  - 'claude': white trim and white tail tips; the glow is orange and the intake badge is the Claude mascot
+//    (painted clay orange by its fleet).
 //  - 'codex': lit tail tips and a lit line along the top of each intake; the glow is cyan and the intake badge a
-//    glowing >_ (painted deep blue by its fleet).
-// Returns geometry by material: gray (the paint), accent (the white trim), glass, dark, glow, badge and logo.
+//    glowing >_ (painted in its mascot's blue, with the navy of the mascot's visor as trim, by its fleet).
+// Returns geometry by material: gray (the paint), accent (the trim), glass, dark, glow, badge and logo.
 export function stealthJet(s = 1, variant = 'claude') {
     const codex = variant === 'codex';
     const noseCone = faceted([
@@ -280,7 +281,7 @@ export function stealthJet(s = 1, variant = 'claude') {
     const canopy = place(sphere(.0125 * s, 18, 12), [.056 * s, .0098 * s, 0], [0, 0, 0], [2.5, .78, .78]);
     const gray = [body, wings, tailplanes, fin(-1), fin(1)];
     const accent = [], dark = [], glow = [], badge = [], logo = [];
-    (codex ? gray : accent).push(noseCone);
+    accent.push(noseCone);
     // Something on a tail, in the tail's own frame (x along the fin, y up it, z across it), carried with the fin.
     const onFin = (geometry, side) => place(geometry, [0, .007 * s, side * .019 * s], [side * .45, 0, 0]);
     // A thin strip from one point to another (in the airframe's units), for trim along an edge.
@@ -299,13 +300,10 @@ export function stealthJet(s = 1, variant = 'claude') {
         glow.push(place(box(.017 * s, .0009 * s, .0012 * s), [-.056 * s, -.0005 * s, side * .0715 * s], [0, side * -.55, 0]));
         // The tail tips: lit on the Codex fighter, white on the Claude fighter.
         (codex ? glow : accent).push(onFin(place(box(.017 * s, .0011 * s, .0032 * s), [-.109 * s, .0362 * s, 0]), side));
-        if (codex) {
-            glow.push(place(box(.036 * s, .0007 * s, .0007 * s), [.001 * s, .0049 * s, side * .0338 * s]));
-        } else {
-            // White bands along the wing's leading edge and along the chine above the intake.
-            accent.push(strip([.0086, .0007, side * .0345], [-.047, .0007, side * .0695], .0045, .0026));
-            accent.push(strip([.045, .0016, side * .0162], [.0, .0044, side * .0318], .002, .0012));
-        }
+        if (codex) glow.push(place(box(.036 * s, .0007 * s, .0007 * s), [.001 * s, .0049 * s, side * .0338 * s]));
+        // Trim bands along the wing's leading edge and along the chine above the intake.
+        accent.push(strip([.0086, .0007, side * .0345], [-.047, .0007, side * .0695], .0045, .0026));
+        accent.push(strip([.045, .0016, side * .0162], [.0, .0044, side * .0318], .002, .0012));
         // The fleet's logo on both faces of each tail.
         for (const face of [1, -1]) logo.push(onFin(place(new THREE.PlaneGeometry(.015 * s, .015 * s), [-.1 * s, .021 * s, face * .0017 * s], [0, face > 0 ? 0 : Math.PI, 0]), side));
         // Twin nozzles.

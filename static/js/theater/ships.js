@@ -5,10 +5,13 @@ import {
 } from './shipkit.js';
 import { steelDeckTexture, teakDeckTexture, flightDeckTexture, hullNumberTexture } from './textures.js';
 import { sailor, crewGroup, windowRow, windowsAround, portholes, deckFittings, vents, raftRack, whips, roofRail, outlineRail, anchorGear, canisterLauncher, torpedoTubes, latticeMast, searchlight, ewArrays, stealthJet, hawkeye, seahawk, tug } from './detail.js';
-// Each fleet's fighter, after the references: stealth fighters in the fleet's paint, with its glow color, the
-// badge on its intakes (a glowing >_ for Codex, the mascot for Claude) and its logo on the tails.
+// Each fleet's fighter, after the references: stealth fighters in the fleet's paint, with its trim and glow
+// colors, the badge on its intakes (a glowing >_ for Codex, the mascot for Claude) and its logo on the tails.
+// The Codex fighter wears its mascot's colors: the blue body, the dark navy of the visor as trim, and the pale
+// cyan of the eyes on its lights. The paint is a little lighter than the mascot's #5e8bf7 so that, lit by the
+// scene, it shows the same blue.
 export const FIGHTERS = {
-    gpt: {model: (s) => stealthJet(s, 'codex'), color: 0x283075, glow: [.3, .9, 3.4], badge: 'prompt', logo: '/static/img/logo-chatgpt.png'},
+    gpt: {model: (s) => stealthJet(s, 'codex'), color: 0x7aa2ff, accent: 0x192b68, glow: [1.25, 2.6, 3.4], badge: 'prompt', logo: '/static/img/logo-chatgpt.png'},
     claude: {model: (s) => stealthJet(s, 'claude'), color: 0xd0623e, glow: [3.4, 1.05, .25], badge: 'mascot', logo: '/static/img/logo-claude.png'},
 };
 
@@ -57,7 +60,7 @@ export function fighterDecals(team) {
     }
     const decal = {transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, side: THREE.DoubleSide};
     return {
-        fighterAccent: new THREE.MeshStandardMaterial({color: 0xe4e2dc, roughness: .48, metalness: .12}),
+        fighterAccent: new THREE.MeshStandardMaterial({color: fighter.accent ?? 0xe4e2dc, roughness: .48, metalness: .12}),
         fighterGlow: new THREE.MeshBasicMaterial({color: new THREE.Color(...fighter.glow), toneMapped: false}),
         // The >_ glows; the mascot is painted on and takes the light like the rest of the jet.
         fighterBadge: badge === 'prompt'
@@ -582,9 +585,10 @@ function carrier(b) {
             for (const piece of jets[part] || []) b.add(key, piece.clone(), [x, top + .013, z], [0, yaw, 0]);
         }
     }
+    // The Hawkeyes wear the fleet's paint too, so every plane on the deck is in its colors.
     const hawk = hawkeye(1);
     for (const [x, z, yaw] of [[.3, .33, 2.6], [.6, .35, 2.6]]) {
-        for (const piece of hawk.gray) b.add('jet', piece.clone(), [x, top + .006, z], [0, yaw, 0]);
+        for (const piece of hawk.gray) b.add('fighter', piece.clone(), [x, top + .006, z], [0, yaw, 0]);
         for (const piece of hawk.white) b.add('white', piece.clone(), [x, top + .006, z], [0, yaw, 0]);
     }
     const helo = seahawk(1);
