@@ -1,24 +1,82 @@
 # Overview
 
-This is a Battleship game where GPT 5.1 Medium plays against Claude haiku 4.5 Thinking.
+AI Battleship: two AI models deploy their fleets and trade fire on a full-screen, real-time 3D ocean. You watch it like a video game. The scoreboard shows the two models by name (for example *GPT-6.1 Terra* vs *Opus 5.5*), and each fleet's status and its model's latest reasoning float on the water under its board.
 
-![Battleship Demo](static/img/image.png?v=2)
+![Battleship](static/img/battle.jpg)
 
-**IMPORTANT:** You need to have an OpenAI and Anthropic API key to run this script.
+## What you see
 
-# Quickstart
-Create a .env file with the following variables:
+- **An open ocean** with Gerstner swells, a physically based sky with clouds, mirror reflections and sun glitter. Four layers of wind chop each move at the true phase speed of their wavelength, so short wavelets lag behind long ones. The sky, sunlit paint and their reflections in the water are balanced to realistic contrast.
+- **Live water over the battle area**, using the same deep-water ripple method (iWave) as the sea reference. Every shell splash, blast, droplet that falls back, piece of debris and moving hull pushes the water. The push spreads as rings with real dispersion: long ripples outrun short ones, rings interfere, they reflect off hulls and the barrier, and they soak away at the edges. Ships sailing in drag real wakes behind them. The rings spread about 3.5 times faster than true speed at this scale so they still read from far above.
+- **Whitewater as lace**: strikes leave a torn white boil that collapses into a bubble-net lace and slowly fades. A little foam traces thin veins; thick foam fills the cells, with blue creases between lit clumps. Hulls and the barrier carry the same lace along their waterlines.
+- **Spray with real drag**: each droplet has a terminal speed set by its size, so fine spray hangs as mist while heavy water falls almost straight. Droplets are drawn as motion-blurred streaks. Where they land they press rings into the water, fleck it white, and a hard landing throws a smaller droplet back up out of its crown.
+- **A concrete barrier** between the two fleets, so neither side can see the other's ships. It is a long precast wall running to the horizon, with a boom of yellow floats along its waterline. Every round arcs over it.
+- **Two 10 × 10 grids projected onto the water like neon light**: a thin bright border with a halo that catches the waves, drawn smoothly at any distance.
+- **Real scale**: every grid square is 75 m of sea, and each ship is built at the real length and beam of its class. The swell has real wavelengths, heights and speeds for that scale.
+- **The classic fleet, at the classic sizes** (5, 4, 3, 3 and 2 squares), each modeled in detail after a real class:
+  - **Carrier (5)**: a Gerald R. Ford-class carrier (337 m), the size of USS Gerald R. Ford or Abraham Lincoln. It has an angled flight deck with a deck park of Super Hornets, Hawkeyes, Seahawks and tractors. The island carries flat radar faces, deck-edge antennas, sponson CIWS and missile launchers, and hangar openings under the overhang.
+  - **Battleship (4)**: an Iowa-class battleship (270 m) with three triple 16-inch turrets on a teak deck, a stepped tower bridge with wings, twin 5-inch mounts, Tomahawk box launchers, Harpoons, CIWS, boats and cranes.
+  - **Cruiser (3)**: a Ticonderoga-class cruiser (173 m). The four SPY-1 faces sit on the cut-off corners of its deckhouses. It also has lattice masts, two Mk 41 launchers, two 5-inch guns, Harpoons and torpedo tubes.
+  - **Submarine (3)**: an Ohio-class submarine (171 m) with its raised missile deck and 24 hatches, a sail with planes and masts, and limber holes.
+  - **Destroyer (2)**: the little boat, a Freedom-class littoral combat ship (118 m). It has a faceted deckhouse, an enclosed mast, a 57 mm gun, Naval Strike Missiles, RAM, a big flight deck and four waterjets.
+- **Detail on every ship**: windows, portholes, railings, bollards, anchor chains, vents, life-raft racks, searchlights, antennas, rotating radars and waving flags. Every ship rides the swell trailing a wake.
+- **Weapons that fit the ship**:
+  - The battleship trains a turret and fires a three-gun broadside that heels the ship. It throws a fireball, a cloud of cordite smoke and a blast ring on the water, and the shells leave tracer streaks.
+  - Cruisers ripple two missiles and the littoral combat ship fires one. Fire blows out of the launcher, and a dense smoke column climbs after the missile. The motor shows shock diamonds and lays a continuous, drifting smoke trail.
+  - The submarine's missile breaches the surface.
+  - The carrier launches a jet that climbs over the barrier, trailing wingtip vortices in its turns, and dives to drop its bomb.
+- **Impacts**:
+  - **Miss**: the round bursts on the water. A tall column rises with a crown of spray and a base surge of mist rolling out, rings spread across the sea, and a marker buoy stays behind.
+  - **Hit**: the blast depends on the weapon. A 5-inch shell makes a sharp, small burst. A 16-inch armour-piercing shell bursts inside the hull and vents up through the deck. A missile's warhead and unburned fuel make a rolling fireball and a rain of burning fragments. A bomb makes the biggest fireball and blast front. The ship matters too: armour sheds sparks and keeps a small shell's blast outside, the carrier's fuel and ordnance go up a moment later, and a submarine's breach is half steam. Each fireball is thrown out at blast speed, stopped by the air, then rises on its own heat and rolls into black smoke. Ammunition cooks off afterwards and burning fuel spreads on the water. Shells sometimes strike low at the waterline and throw the sea up with the fire.
+- **Fires after a hit**, modelled on real ship fires. They start small, take hold over a few seconds and pulse like pool fires (about 1.5/√D times a second for a fire D metres across). Flame height grows with the fire's size. Flames rise on their own buoyancy, which dies away as they mix and cool, and every so often something new catches and the fire roars up. A fire that has burned a while spreads along the deck. Smoke leaves the flame tips in a buoyant plume that rises at real plume speeds, widens, curls in turbulent eddies and bends over in a wind that strengthens with height. The plume is lit orange from below by the fire. Scorched steel glows in patches, and fires burn out with a hiss of steam when the water reaches them.
+- **Missile smoke**: solid-rocket exhaust is dense white smoke. The launch column is thrown up out of the cell, stopped by the air within tens of metres, then rises on its own heat, billows and drifts downwind. Exhaust deflected off the deck rolls across it and over the sides. The trail is laid down continuously along the flight path, so it stays one unbroken rope that widens, curls and shears in the wind long after the missile has gone.
+- **Sinking**: the ship is wracked by explosions, then settles halfway (by the bow, by the stern, or broken in two) and stays there burning for the rest of the battle. The wreck marks the sunk ship, so its squares on the grid lose their red.
+- **A cinematic camera**: over the shoulder of the firing ship, then a crane move over the barrier following the round, then a close angle on the impact. There is also a tactical wide view and a free camera. Scroll or pinch to zoom whichever camera is running, and drag at any time to take the camera yourself.
+- **Synthesized sound**: gunfire, whistles, explosions, splashes, the sea and the wind, all placed around the camera.
+
+Everything is generated in code with [three.js](https://threejs.org) (vendored in `static/vendor/three`), so there are no model or texture downloads.
+
+## The heads-up display
+
+- **Scoreboard (top)**: each model's name, its mascot, ships afloat, the enemy ships it has sunk, and whether it is thinking.
+- **Under each board**: one line of minimal ship icons, dimmed once a ship is sunk, and the model's latest explanation as plain text floating on the water. Both follow the board as the camera moves.
+- **Bottom**: the current attack or event, with Pause, New match and History.
+
+Shots, hits, accuracy and thinking time are not shown during the match. They are saved with every API game and appear in the *History* table.
+
+## Connections
+
+Pick one under *Connection* on the setup screen, then pick a model for each fleet:
+
+- **Test** (default): the chosen models are shown, but their moves are simulated: no LLM calls and no keys. The simulation uses a probability map of where ships can still fit.
+- **API keys**: calls the OpenAI and Anthropic APIs with the keys in `.env`.
+
+The model lists are in `MODELS` in `players.py`. Check the IDs against your provider's model list before connecting keys.
+
+## Quickstart
+
+Install the Python dependencies:
 ```bash
-OPENAI_API_KEY=your_openai_api_key
-ANTHROPIC_API_KEY=your_anthropic_api_key
-```
-
-Install dependencies:
-```bash
-python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
 ```
 
 Run the app:
 ```bash
 python app.py
 ```
+
+Then open http://127.0.0.1:5001. For API mode, copy `.env.example` to `.env` and add your keys. Never commit a populated `.env` (it is in `.gitignore`). Finished API games are saved to `data/battle-history.json` and shown under *Universal stats* and *History*.
+
+## Controls
+
+| Input | Action |
+| --- | --- |
+| Drag | Orbit the camera (switches to the free camera from the current view) |
+| Right-drag | Pan (free camera) |
+| Scroll / pinch | Zoom in or out, in any camera mode |
+| `1` `2` `3` | Cinematic, tactical or free camera |
+| `H` | Hide or show the overlay |
+| `M` | Sound on or off |
+| `F` | Full screen |
+
+The speed button in the top left plays the battle at 1×, 2× or 4×.

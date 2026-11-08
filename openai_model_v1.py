@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from openai import OpenAI
 from pydantic import BaseModel, Field
 from typing import Dict

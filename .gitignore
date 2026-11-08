@@ -13,3 +13,6 @@ __pycache__/
 # mac / editor
 .DS_Store
 .vscode/
+
+# saved match history
+data/
