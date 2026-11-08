@@ -82,9 +82,10 @@ Each shot prompt carries:
 - its own fleet as it placed it at the start, with what the enemy has hit or sunk since, and the plan it gave when placing it;
 - the radar of what it knows about the enemy grid;
 - every shot it has fired this match, each with its result and the one-line reason it gave at the time (for example `Turn 7: D1 → HIT (you thought: "...")`);
-- the notes it wrote to itself on its last turn.
+- the notes it wrote to itself on its last turn;
+- a score line: how many of the enemy's 5 ships it has sunk, and how many of its own it has lost.
 
-Each answer must include updated notes (what it has learned about the enemy fleet and its plan, up to 600 characters), and these replace the old ones. The opponent never sees them. Scripted Test players don't use notes.
+Each answer must include updated notes (what it has learned about the enemy fleet and its plan), and these replace the old ones. The model is told the limits: at most 150 characters for its reason, 600 for its notes, and 200 for its placement plan. Anything longer is cut at a whole word with an ellipsis, never mid-word. The opponent never sees the notes, but you do: each model's notes appear on the water under its board, as an italic *Plan:* line below its latest reason. Scripted Test players don't use notes.
 
 Pick one under *Connection* on the setup screen, then pick a model for each fleet:
 

@@ -195,6 +195,12 @@ class CLIConnectionTest(unittest.TestCase):
         self.assertRegex(last, r'Turn \d+: E5 → (MISS|HIT)')
         self.assertIn('you thought: "Reason for E5."', last)
         self.assertRegex(last, r'Your notes from your last turn:\nNotes written on turn \d+\.')
+        # The score line, and the limits the model is held to.
+        self.assertRegex(last, r"SCORE: you have sunk 0 of the enemy's 5 ships; the enemy has sunk 0 of your 5\.")
+        self.assertIn('at most 150 characters', last)
+        self.assertIn('at most 600 characters', last)
+        # The notes reach the screen.
+        self.assertTrue(self.client.get('/api/game-state').get_json()['players']['claude']['notes'].startswith('Notes written on turn'))
         # A new match starts with a fresh memory.
         self.client.post('/api/start-games', json={'mode': 'cli', 'gpt_model': 'gpt-6-luna', 'claude_model': 'claude-haiku-5-5'})
         for _ in range(2):
@@ -206,6 +212,13 @@ class CLIConnectionTest(unittest.TestCase):
         first = [c['prompt'] for c in self.calls() if c['tool'] == 'claude' and 'Turn ' in c['prompt']][-1]
         self.assertIn('No shots yet. This is your first shot.', first)
         self.assertIn('Your notes from your last turn:\nNone yet.', first)
+
+    def test_long_answers_are_cut_at_a_word(self):
+        from moves import read_shot
+        target, reasoning, notes = read_shot({'target': 'B2', 'reasoning': 'because ' * 40, 'notes': 'plan ' * 200})
+        self.assertLessEqual(len(reasoning), 150)
+        self.assertLessEqual(len(notes), 600)
+        self.assertTrue(reasoning.endswith('because…') and notes.endswith('plan…'))
 
     def test_illegal_placement_stops_the_match(self):
         import cli_players
