@@ -4,9 +4,47 @@ import {
     hullGeometry, hullProfile, deckGeometry, railGeometry, shipMaterials, flagMaterial, lerp,
 } from './shipkit.js';
 import { steelDeckTexture, teakDeckTexture, flightDeckTexture, hullNumberTexture } from './textures.js';
-import { sailor, crewGroup, windowRow, windowsAround, portholes, deckFittings, vents, raftRack, whips, roofRail, outlineRail, anchorGear, canisterLauncher, torpedoTubes, latticeMast, searchlight, ewArrays, hornet, stealthJet, hawkeye, seahawk, tug } from './detail.js';
-// Each fleet's fighter: the Codex fleet's Super Hornets, the Claude fleet's clay-orange stealth fighters.
-export const FIGHTERS = {gpt: {model: hornet, color: null}, claude: {model: stealthJet, color: 0xd36b4f}};
+import { sailor, crewGroup, windowRow, windowsAround, portholes, deckFittings, vents, raftRack, whips, roofRail, outlineRail, anchorGear, canisterLauncher, torpedoTubes, latticeMast, searchlight, ewArrays, stealthJet, hawkeye, seahawk, tug } from './detail.js';
+// Each fleet's fighter, after the references: the Codex fleet's deep-blue stealth fighters with glowing cyan
+// edges, a lit >_ on the intakes and the logo on the tails; the Claude fleet's clay-orange stealth fighters.
+export const FIGHTERS = {
+    gpt: {model: (s) => stealthJet(s, 'codex'), color: 0x283075, logo: '/static/img/logo-chatgpt.png'},
+    claude: {model: (s) => stealthJet(s, 'claude'), color: 0xd36b4f},
+};
+
+// The glowing strips, the lit prompt and the tail logo of a fleet's fighters (new materials each call; the
+// textures are shared).
+const decalTextures = {};
+export function fighterDecals(team) {
+    const logoUrl = FIGHTERS[team]?.logo;
+    if (!decalTextures.prompt) {
+        const element = document.createElement('canvas');
+        element.width = 256; element.height = 128;
+        const c = element.getContext('2d');
+        c.font = 'bold 92px "SF Mono", Menlo, Consolas, monospace';
+        c.textAlign = 'center';
+        c.textBaseline = 'middle';
+        c.fillStyle = '#a8e6ff';
+        c.shadowColor = 'rgba(60, 170, 255, 1)';
+        c.shadowBlur = 18;
+        for (let i = 0; i < 2; i++) c.fillText('>_', 128, 64);
+        decalTextures.prompt = new THREE.CanvasTexture(element);
+        decalTextures.prompt.colorSpace = THREE.SRGBColorSpace;
+    }
+    if (logoUrl && !decalTextures[logoUrl]) {
+        decalTextures[logoUrl] = new THREE.TextureLoader().load(logoUrl);
+        decalTextures[logoUrl].colorSpace = THREE.SRGBColorSpace;
+        decalTextures[logoUrl].anisotropy = 8;
+    }
+    return {
+        fighterGlow: new THREE.MeshBasicMaterial({color: new THREE.Color(.3, .9, 3.4), toneMapped: false}),
+        fighterPrompt: new THREE.MeshBasicMaterial({map: decalTextures.prompt, transparent: true, depthWrite: false, toneMapped: false, color: new THREE.Color(2.6, 2.6, 2.6), polygonOffset: true, polygonOffsetFactor: -2, side: THREE.DoubleSide}),
+        fighterLogo: new THREE.MeshStandardMaterial({map: logoUrl ? decalTextures[logoUrl] : null, transparent: true, alphaTest: .25, depthWrite: false, roughness: .45, metalness: .1, polygonOffset: true, polygonOffsetFactor: -2, visible: Boolean(logoUrl)}),
+    };
+}
+
+// Every part of a fighter as meshes, by material (paint, glass, dark, and any glow, prompt and logo).
+const FIGHTER_PARTS = {gray: 'fighter', glass: 'glass', dark: 'dark', glow: 'fighterGlow', prompt: 'fighterPrompt', logo: 'fighterLogo'};
 
 // The five ships of the classic game, at their classic sizes (5, 4, 3, 3 and 2 squares), each modeled after a
 // real class and built at its real dimensions: a Ford-class carrier, an Iowa-class battleship, a
@@ -459,7 +497,9 @@ function deckEdge(x, side) {
 export function jetMesh(mats, scale = 1.1, team = 'gpt') {
     const pieces = (FIGHTERS[team] || FIGHTERS.gpt).model(scale);
     const group = new THREE.Group();
-    group.add(partMesh(mats.fighter || mats.jet, pieces.gray), partMesh(mats.glass, pieces.glass), partMesh(mats.dark, pieces.dark));
+    for (const [part, key] of Object.entries(FIGHTER_PARTS)) {
+        if (pieces[part]?.length) group.add(partMesh(mats[key] || mats.jet, pieces[part]));
+    }
     return group;
 }
 
@@ -514,9 +554,9 @@ function carrier(b) {
         [-.78, .34, 2.25], [-1.0, .34, 2.25], [-1.22, .34, 2.25], [-1.44, .34, 2.25], [-1.66, .34, 2.25], [-1.88, .33, 2.25], [-2.1, .31, 2.25],
         [-.9, .19, 2.25], [-1.12, .19, 2.25], [-1.34, .19, 2.25], [-1.56, .19, 2.25], [-1.78, .18, 2.25], [1.2, .38, 2.5], [1.0, .4, 2.5]];
     for (const [x, z, yaw] of park) {
-        for (const piece of jets.gray) b.add('fighter', piece.clone(), [x, top + .013, z], [0, yaw, 0]);
-        for (const piece of jets.glass) b.add('glass', piece.clone(), [x, top + .013, z], [0, yaw, 0]);
-        for (const piece of jets.dark) b.add('dark', piece.clone(), [x, top + .013, z], [0, yaw, 0]);
+        for (const [part, key] of Object.entries(FIGHTER_PARTS)) {
+            for (const piece of jets[part] || []) b.add(key, piece.clone(), [x, top + .013, z], [0, yaw, 0]);
+        }
     }
     const hawk = hawkeye(1);
     for (const [x, z, yaw] of [[.3, .33, 2.6], [.6, .35, 2.6]]) {
@@ -651,6 +691,7 @@ export class Ship {
         const mats = shipMaterials(shared, this.uniforms, deckTextures);
         mats.flag = textures.flags[team.id];
         mats.fighter = mats.fighter || mats.jet;
+        Object.assign(mats, fighterDecals(team.id));
         builder.materials = mats;
         builder.team = team.id;
         const design = DESIGNS[type](builder);

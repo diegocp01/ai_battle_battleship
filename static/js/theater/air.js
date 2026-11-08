@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { FIGHTERS } from './ships.js';
+import { FIGHTERS, fighterDecals } from './ships.js';
 import { place, box, cyl } from './shipkit.js';
 import { RAMP, FRAME } from './effects.js';
 
@@ -123,12 +123,13 @@ export class AirTraffic {
             this.helos[team] = helo;
         }
         // Each fleet's own fighters fly its patrols.
-        this.jetGeometry = {};
-        this.jetPaint = {};
+        this.jetParts = {};
         for (const [team, fighter] of Object.entries(FIGHTERS)) {
             const jet = fighter.model(1.15);
-            this.jetGeometry[team] = {gray: merge(jet.gray.map(g => g.clone())), glass: merge(jet.glass.map(g => g.clone())), dark: merge(jet.dark.map(g => g.clone()))};
-            this.jetPaint[team] = fighter.color ? new THREE.MeshStandardMaterial({color: fighter.color, roughness: .5, metalness: .12}) : this.materials.gray;
+            const decals = fighterDecals(team);
+            const paint = fighter.color ? new THREE.MeshStandardMaterial({color: fighter.color, roughness: .5, metalness: .12}) : this.materials.gray;
+            const materials = {gray: paint, glass: this.materials.glass, dark: this.materials.dark, glow: decals.fighterGlow, prompt: decals.fighterPrompt, logo: decals.fighterLogo};
+            this.jetParts[team] = Object.entries(materials).filter(([part]) => jet[part]?.length).map(([part, material]) => ({geometry: merge(jet[part].map(g => g.clone())), material}));
         }
         this.flights = [];
         this.nextFlight = 12 + Math.random() * 15;
@@ -151,8 +152,7 @@ export class AirTraffic {
         const x = center.x + (Math.random() - .5) * 6;
         const jets = [0, 1].map(i => {
             const group = new THREE.Group();
-            const geometry = this.jetGeometry[team];
-            group.add(new THREE.Mesh(geometry.gray, this.jetPaint[team]), new THREE.Mesh(geometry.glass, this.materials.glass), new THREE.Mesh(geometry.dark, this.materials.dark));
+            for (const part of this.jetParts[team]) group.add(new THREE.Mesh(part.geometry, part.material));
             group.traverse(o => { if (o.isMesh) o.castShadow = true; });
             this.scene.add(group);
             return group;

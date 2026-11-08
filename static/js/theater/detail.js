@@ -241,11 +241,16 @@ function faceted(stations, s) {
     return geometry;
 }
 
-// The Claude fleet's stealth fighter, after the reference: about the size of a Super Hornet (19 m long, 14 m
-// span), a long chined nose to a sharp point, a bubble canopy, trapezoid wings, square side intakes under the
-// chines, all-moving tailplanes, twin tails canted outward and twin nozzles, with dark sensor windows behind the
-// canopy. Same frame as hornet(): nose toward +x, the pilot's eye near (.054, .0128).
-export function stealthJet(s = 1) {
+// The fleets' stealth fighters, after the references: about the size of a Super Hornet (19 m long, 14 m span),
+// a long chined nose to a sharp point, a bubble canopy, trapezoid wings, side intakes under the chines,
+// all-moving tailplanes, twin tails canted outward and twin nozzles. Same frame as hornet(): nose toward +x, the
+// pilot's eye near (.054, .0128).
+//  - 'claude': square intakes and dark sensor windows behind the canopy (painted clay orange by its fleet).
+//  - 'codex': bigger raked intakes, glowing cyan strips on the wingtips, the fin tips and round each intake, a
+//    glowing >_ on each intake's side, and the fleet's logo on both faces of both tails (painted deep blue).
+// Returns geometry by material: gray (the paint), glass, dark, and for the Codex fighter glow, prompt and logo.
+export function stealthJet(s = 1, variant = 'claude') {
+    const codex = variant === 'codex';
     const body = faceted([
         [.126, .0004, .0004, -.0004, 0],
         [.105, .0055, .0042, -.0036, 0],
@@ -268,18 +273,34 @@ export function stealthJet(s = 1) {
         .036 * s), [0, .007 * s, side * .019 * s], [side * .45, 0, 0]);
     const canopy = place(sphere(.0125 * s, 18, 12), [.056 * s, .0098 * s, 0], [0, 0, 0], [2.5, .78, .78]);
     const gray = [body, wings, tailplanes, fin(-1), fin(1)];
-    const dark = [];
+    const dark = [], glow = [], prompt = [], logo = [];
+    // Something on a tail, in the tail's own frame (x along the fin, y up it, z across it), carried with the fin.
+    const onFin = (geometry, side) => place(geometry, [0, .007 * s, side * .019 * s], [side * .45, 0, 0]);
     for (const side of [1, -1]) {
-        // The intakes: square boxes under the chines, raked, with a dark mouth.
-        gray.push(place(box(.034 * s, .012 * s, .0115 * s), [.004 * s, -.0034 * s, side * .0262 * s], [0, 0, -.06]));
-        dark.push(place(box(.002 * s, .009 * s, .009 * s), [.0215 * s, -.0028 * s, side * .0262 * s], [0, side * -.25, 0]));
+        if (codex) {
+            // Big raked intakes with a lit outline, and the glowing prompt on the outer face.
+            gray.push(place(box(.042 * s, .016 * s, .013 * s), [.002 * s, -.0034 * s, side * .0272 * s], [0, 0, -.06]));
+            dark.push(place(box(.002 * s, .013 * s, .011 * s), [.0235 * s, -.0028 * s, side * .0272 * s], [0, side * -.3, 0]));
+            glow.push(place(box(.036 * s, .0007 * s, .0007 * s), [.001 * s, .0049 * s, side * .0338 * s]));
+            glow.push(place(box(.0007 * s, .0165 * s, .0007 * s), [.0222 * s, -.0034 * s, side * .0338 * s], [0, 0, -.42]));
+            prompt.push(place(new THREE.PlaneGeometry(.026 * s, .013 * s), [.003 * s, -.0034 * s, side * .0341 * s], [0, side > 0 ? 0 : Math.PI, 0]));
+            // Lit strips along the wingtips and the tops of both tails.
+            glow.push(place(box(.017 * s, .0009 * s, .0012 * s), [-.056 * s, -.0005 * s, side * .0715 * s], [0, side * -.55, 0]));
+            glow.push(onFin(place(box(.017 * s, .0011 * s, .0032 * s), [-.109 * s, .0362 * s, 0]), side));
+            // The logo on both faces of each tail.
+            for (const face of [1, -1]) logo.push(onFin(place(new THREE.PlaneGeometry(.015 * s, .015 * s), [-.1 * s, .021 * s, face * .0017 * s], [0, face > 0 ? 0 : Math.PI, 0]), side));
+        } else {
+            // The intakes: square boxes under the chines, raked, with a dark mouth.
+            gray.push(place(box(.034 * s, .012 * s, .0115 * s), [.004 * s, -.0034 * s, side * .0262 * s], [0, 0, -.06]));
+            dark.push(place(box(.002 * s, .009 * s, .009 * s), [.0215 * s, -.0028 * s, side * .0262 * s], [0, side * -.25, 0]));
+        }
         // Twin nozzles.
         dark.push(place(cyl(.0056 * s, .0062 * s, .012 * s, 14), [-.118 * s, .0012 * s, side * .0082 * s], [0, 0, Math.PI / 2]));
         // Sensor windows on the upper sides behind the canopy.
         dark.push(place(box(.007 * s, .0012 * s, .004 * s), [.032 * s, .0106 * s, side * .0125 * s], [side * .5, 0, 0]));
         dark.push(place(box(.006 * s, .0012 * s, .0035 * s), [.012 * s, .0108 * s, side * .0165 * s], [side * .45, 0, 0]));
     }
-    return {gray, glass: [canopy], dark};
+    return {gray, glass: [canopy], dark, glow, prompt, logo};
 }
 
 // E-2 Hawkeye: high wing, the big rotodome on its pylon, four small fins.
