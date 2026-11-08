@@ -6,7 +6,11 @@ export const SOUND_BANK = Object.freeze({
     subMissile: {file: 'missile-sub.wav', gain: .9},
     cannonHeavy: {file: 'cannon-heavy.wav', gain: .95},
     cannon: {file: 'cannon-light.wav', gain: .8},
-    explosion: {file: 'ship-hit.wav', gain: 1},
+    explosion: {file: 'ship-hit.wav', gain: 1}, // missile warhead / secondary blast
+    impactShell: {file: 'impact-shell.wav', gain: .8},
+    impactAP: {file: 'impact-ap.wav', gain: 1},
+    impactJet: {file: 'impact-jet.wav', gain: 1},
+    impactUnderwater: {file: 'impact-underwater.wav', gain: .9},
     splash: {file: 'ocean-miss.wav', gain: .8},
     creak: {file: 'ship-sinking.wav', gain: .8},
     jet: {file: 'jet.wav', gain: .65, timed: true},
@@ -29,8 +33,23 @@ export const OPEN_CUES = Object.freeze({
     radioFinal: 'Radio, last words between the carrier and the pilot just before impact.',
 });
 
-export function soundKey(kind, scale) {
+export function soundKey(kind, scale, impact = {}) {
+    if (kind === 'explosion') {
+        if (impact.weapon === 'torpedo') return 'impactUnderwater';
+        if (impact.weapon === 'gun') return 'impactShell';
+        if (impact.weapon === 'salvo') return 'impactAP';
+        if (impact.weapon === 'strike') return 'impactJet';
+    }
     return kind === 'cannon' && scale > 1 ? 'cannonHeavy' : kind;
+}
+
+// Subtle hull coloration, not another full-volume explosion layered on every hit.
+// Underwater detonation is a distinct event; a waterline shell retains its own attack.
+export function impactVoice({weapon, ship, waterline, mass} = {}) {
+    if (!weapon) return {rate: 1, cutoff: 0};
+    const hullRate = {Carrier: .96, Battleship: .92, Cruiser: 1, Destroyer: 1.05, Submarine: .94}[ship] ?? 1;
+    const shellRate = weapon === 'gun' ? (mass != null && mass < 5 ? 1.12 : .9) : 1;
+    return {rate: hullRate * shellRate, cutoff: ship === 'Submarine' || weapon === 'torpedo' ? 1800 : waterline ? 4200 : 0};
 }
 
 export async function loadSoundBank(ctx, onLoaded, fetcher = fetch) {

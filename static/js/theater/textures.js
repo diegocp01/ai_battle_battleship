@@ -563,7 +563,7 @@ export function railTexture() {
     return canvasTexture(element, {repeat: true});
 }
 
-export function flagTexture(color, logo) {
+export function flagTexture(color, mascot) {
     const [element, context] = canvas(256, 160);
     const texture = canvasTexture(element);
     const draw = (image) => {
@@ -575,21 +575,23 @@ export function flagTexture(color, logo) {
         context.fillStyle = gradient;
         context.fillRect(0, 0, 256, 160);
         if (image) {
-            // Draw the logo in white, using it as a mask.
-            const [maskCanvas, mask] = canvas(110, 110);
-            mask.drawImage(image, 0, 0, 110, 110);
-            mask.globalCompositeOperation = 'source-in';
-            mask.fillStyle = '#ffffff';
-            mask.fillRect(0, 0, 110, 110);
-            context.drawImage(maskCanvas, 73, 25);
+            // Keep faces and team colors intact; a light roundel separates the mascot
+            // from the flag cloth, while aspect-fit avoids stretching either character.
+            context.fillStyle = '#f5f1e8';
+            context.beginPath();
+            context.ellipse(128, 80, 82, 70, 0, 0, Math.PI * 2);
+            context.fill();
+            const fit = Math.min(146 / image.naturalWidth, 124 / image.naturalHeight);
+            const width = image.naturalWidth * fit, height = image.naturalHeight * fit;
+            context.drawImage(image, (256 - width) / 2, (160 - height) / 2, width, height);
         }
         texture.needsUpdate = true;
     };
     draw(null);
-    if (logo) {
+    if (mascot) {
         const image = new Image();
         image.onload = () => draw(image);
-        image.src = logo;
+        image.src = mascot;
     }
     return texture;
 }

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><title>Fleet mascot flag review</title>
+<link rel="icon" href="data:,">
+<script type="importmap">{"imports":{"three":"/static/vendor/three/three.module.js","three/addons/":"/static/vendor/three/addons/"}}</script>
+<style>body{margin:0;background:#101a24;color:white;font:15px system-ui}#theater{position:fixed;inset:0}aside{position:fixed;z-index:2;left:20px;top:20px;padding:20px;background:#14232fee;border-radius:12px;width:280px}h1{font-size:22px;margin:0 0 12px}canvas.preview{width:128px;height:80px}select{padding:8px;margin:8px 0}pre{white-space:pre-wrap;font-size:12px;color:#b7e8c8}</style>
+<div id="theater"></div><aside><h1>Fleet mascot flags</h1><div id="previews"></div><label>Team <select id="team"><option value="gpt">Codex</option><option value="claude">Claude Code</option></select></label><br><label>Ship <select id="ship"><option>Carrier</option><option>Battleship</option><option>Cruiser</option><option>Destroyer</option><option>Submarine</option></select></label><pre id="status">Loading fleet…</pre></aside>
+<script type="module">
+import * as THREE from 'three';
+import {createTheater} from '/static/js/theater/index.js';
+const t=await createTheater(document.querySelector('#theater'));
+t.setCameraMode('free');t.env.setTime('afternoon');
+const layout=[{name:'Carrier',direction:'H',cells:['A1','B1','C1','D1','E1']},{name:'Battleship',direction:'H',cells:['A3','B3','C3','D3']},{name:'Cruiser',direction:'H',cells:['A5','B5','C5']},{name:'Destroyer',direction:'H',cells:['A7','B7']},{name:'Submarine',direction:'H',cells:['A9','B9','C9']}];
+for(const team of ['gpt','claude']) await t.deploy(team,layout,{animate:false});
+for(const team of ['gpt','claude']) {
+    const canvas=t.shipTextures.flags[team].map.image;
+    canvas.className='preview';canvas.title=team==='gpt'?'Codex mascot flag':'Claude Code mascot flag';
+    document.querySelector('#previews').append(canvas);
+    for(const ship of t.fleets[team].ships.values()) {
+        if(!ship.design.parts.flags.length||ship.design.parts.flags.some(f=>f.material!==t.shipTextures.flags[team])) throw Error('Missing team flag on '+ship.type);
+    }
+}
+function focus() {
+    const ship=t.fleets[document.querySelector('#team').value].ships.get(document.querySelector('#ship').value);
+    t.scene.updateMatrixWorld(true);
+    const flag=ship.design.parts.flags[0], at=flag.getWorldPosition(new THREE.Vector3());
+    t.camera.position.copy(at).add(new THREE.Vector3(.04,.04,.45));
+    t.director.controls.target.copy(at);t.director.controls.update();
+}
+document.querySelector('#team').onchange=document.querySelector('#ship').onchange=focus;
+focus();document.querySelector('#status').textContent='PASS: all 10 ships use their team’s mascot flag material.\nInspect both textures and select any ship.';
+</script>
+</html>
